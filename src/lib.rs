@@ -39,10 +39,15 @@ impl S3VectorsClient {
     /// Create a new S3 Vectors client for the specified region
     pub fn new(region: &str) -> Self {
         Self {
-            endpoint: format!("https://s3vectors.{}.amazonaws.com", region),
+            endpoint: format!("https://s3vectors.{}.api.aws", region),
             region: region.to_string(),
             signer: None,
         }
+    }
+    
+    /// Get the region this client is configured for
+    pub fn region(&self) -> &str {
+        &self.region
     }
     
     /// Create a new client with explicit credentials
@@ -53,7 +58,7 @@ impl S3VectorsClient {
         session_token: Option<String>,
     ) -> Self {
         Self {
-            endpoint: format!("https://s3vectors.{}.amazonaws.com", region),
+            endpoint: format!("https://s3vectors.{}.api.aws", region),
             region: region.to_string(),
             signer: Some(auth::AwsV4Signer::new(
                 access_key_id,
@@ -69,9 +74,14 @@ impl S3VectorsClient {
         let region = CONFIG.aws_region.clone();
         
         let signer = if CONFIG.has_credentials() {
+            let access_key = CONFIG.aws_access_key_id.clone()
+                .ok_or_else(|| anyhow::anyhow!("AWS_ACCESS_KEY_ID not set"))?;
+            let secret_key = CONFIG.aws_secret_access_key.clone()
+                .ok_or_else(|| anyhow::anyhow!("AWS_SECRET_ACCESS_KEY not set"))?;
+            
             Some(auth::AwsV4Signer::new(
-                CONFIG.aws_access_key_id.clone().unwrap(),
-                CONFIG.aws_secret_access_key.clone().unwrap(),
+                access_key,
+                secret_key,
                 CONFIG.aws_session_token.clone(),
                 region.clone(),
             ))
@@ -80,7 +90,7 @@ impl S3VectorsClient {
         };
         
         Ok(Self {
-            endpoint: format!("https://s3vectors.{}.amazonaws.com", region),
+            endpoint: format!("https://s3vectors.{}.api.aws", region),
             region,
             signer,
         })

@@ -19,6 +19,19 @@ pub enum IndexStatus {
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "lowercase")]
+pub enum DataType {
+    Float32,
+}
+
+impl Default for DataType {
+    fn default() -> Self {
+        DataType::Float32
+    }
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "lowercase")]
 pub enum DistanceMetric {
     Cosine,
     Euclidean,
@@ -34,29 +47,40 @@ impl Default for DistanceMetric {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct VectorBucket {
-    pub bucket_name: String,
-    pub bucket_arn: String,
-    pub region: String,
-    pub created_at: String,
-    pub status: BucketStatus,
+    pub vector_bucket_name: String,
+    pub vector_bucket_arn: String,
+    pub creation_time: f64,
+    #[serde(default)]
+    pub status: Option<BucketStatus>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub encryption_configuration: Option<EncryptionConfiguration>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct EncryptionConfiguration {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub kms_key_arn: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub sse_type: Option<String>,
 }
 
 #[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CreateVectorBucketRequest {
-    pub bucket_name: String,
+    pub vector_bucket_name: String,
 }
 
 #[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CreateVectorBucketResponse {
-    pub bucket: VectorBucket,
+    // Empty response body for successful creation
 }
 
 #[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct DeleteVectorBucketRequest {
-    pub bucket_name: String,
+    pub vector_bucket_name: String,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -82,10 +106,12 @@ pub struct ListVectorBucketsResponse {
 pub struct VectorIndex {
     pub index_name: String,
     pub index_arn: String,
-    pub vector_dimensions: u32,
+    pub dimension: u32,
+    pub data_type: DataType,
     pub distance_metric: DistanceMetric,
-    pub created_at: String,
-    pub status: IndexStatus,
+    pub creation_time: f64,
+    #[serde(default)]
+    pub status: Option<IndexStatus>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub vector_count: Option<u64>,
 }
@@ -93,12 +119,20 @@ pub struct VectorIndex {
 #[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CreateIndexRequest {
-    pub bucket_name: String,
+    pub vector_bucket_name: String,
     pub index_name: String,
-    pub vector_dimensions: u32,
+    pub dimension: u32,
+    pub data_type: DataType,
     pub distance_metric: DistanceMetric,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub metadata_fields: Option<Vec<MetadataField>>,
+    pub metadata_configuration: Option<MetadataConfiguration>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MetadataConfiguration {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub non_filterable_metadata_keys: Option<Vec<String>>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -122,14 +156,21 @@ pub enum MetadataFieldType {
 #[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct DeleteIndexRequest {
-    pub bucket_name: String,
+    pub vector_bucket_name: String,
+    pub index_name: String,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DescribeIndexRequest {
+    pub vector_bucket_name: String,
     pub index_name: String,
 }
 
 #[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ListIndexesRequest {
-    pub bucket_name: String,
+    pub vector_bucket_name: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub max_results: Option<u32>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -144,22 +185,52 @@ pub struct ListIndexesResponse {
     pub next_token: Option<String>,
 }
 
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GetIndexRequest {
+    pub vector_bucket_name: String,
+    pub index_name: String,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GetIndexResponse {
+    pub index: IndexInfo,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct IndexInfo {
+    pub dimension: u32,
+    pub index_name: String,
+    pub vector_bucket_name: String,
+    pub created_at: String,
+    pub status: IndexStatus,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub vector_count: Option<u64>,
+}
+
 // Vector types
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct VectorData {
+    pub float32: Vec<f32>,
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Vector {
     pub key: String,
-    pub vector: Vec<f32>,
+    pub data: VectorData,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub metadata: Option<Value>,
 }
 
 impl Vector {
     pub fn validate(&self, expected_dimensions: u32) -> anyhow::Result<()> {
-        if self.vector.len() != expected_dimensions as usize {
+        if self.data.float32.len() != expected_dimensions as usize {
             anyhow::bail!(
                 "Vector dimension mismatch: expected {}, got {}",
                 expected_dimensions,
-                self.vector.len()
+                self.data.float32.len()
             );
         }
         
@@ -177,7 +248,7 @@ impl Vector {
 #[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PutVectorsRequest {
-    pub bucket_name: String,
+    pub vector_bucket_name: String,
     pub index_name: String,
     pub vectors: Vec<Vector>,
 }
@@ -185,7 +256,7 @@ pub struct PutVectorsRequest {
 #[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct GetVectorsRequest {
-    pub bucket_name: String,
+    pub vector_bucket_name: String,
     pub index_name: String,
     pub keys: Vec<String>,
     #[serde(default = "default_true")]
@@ -212,7 +283,7 @@ pub struct RetrievedVector {
 #[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct DeleteVectorsRequest {
-    pub bucket_name: String,
+    pub vector_bucket_name: String,
     pub index_name: String,
     pub keys: Vec<String>,
 }
@@ -220,7 +291,7 @@ pub struct DeleteVectorsRequest {
 #[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ListVectorsRequest {
-    pub bucket_name: String,
+    pub vector_bucket_name: String,
     pub index_name: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub max_results: Option<u32>,
@@ -239,7 +310,7 @@ pub struct ListVectorsResponse {
 #[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct QueryVectorsRequest {
-    pub bucket_name: String,
+    pub vector_bucket_name: String,
     pub index_name: String,
     pub query_vector: QueryVector,
     pub top_k: u32,
@@ -274,7 +345,7 @@ pub struct MatchedVector {
 #[derive(Clone, Debug, Deserialize)]
 pub struct ServiceError {
     #[serde(rename = "__type")]
-    pub error_type: String,
+    pub error_type: Option<String>,
     pub message: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub request_id: Option<String>,

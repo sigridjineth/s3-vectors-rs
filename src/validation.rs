@@ -66,17 +66,16 @@ pub fn validate_top_k(top_k: u32) -> Result<()> {
 
 /// Validate AWS region is supported for S3 Vectors preview
 pub fn validate_region(region: &str) -> Result<()> {
+    // S3 Vectors is currently in preview and only available in specific regions
+    // Based on AWS documentation, these are the confirmed preview regions
     const SUPPORTED_REGIONS: &[&str] = &[
         "us-east-1",
-        "us-east-2",
         "us-west-2",
-        "ap-southeast-2",
-        "eu-central-1",
     ];
     
     if !SUPPORTED_REGIONS.contains(&region) {
         bail!(
-            "S3 Vectors preview is only available in: {}",
+            "S3 Vectors preview is only available in: {}. Please use one of these regions.",
             SUPPORTED_REGIONS.join(", ")
         );
     }

@@ -1,8 +1,8 @@
 use anyhow::{Context, Result};
+use crossbeam_channel::{unbounded, Sender};
 use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
 use std::path::Path;
-use std::sync::mpsc;
 use std::time::Instant;
 use tokio::sync::Semaphore;
 use tracing::{debug, info, warn};
@@ -12,7 +12,7 @@ use crate::{
     document::{Document, DocumentChunk, DocumentProcessor},
     embeddings,
     types::*,
-    S3VectorsClient, Vector,
+    S3VectorsClient, Vector, VectorData,
 };
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -27,8 +27,8 @@ pub struct RagConfig {
 impl Default for RagConfig {
     fn default() -> Self {
         Self {
-            bucket_name: "rag-vectors".to_string(),
-            index_name: "documents".to_string(),
+            bucket_name: "rag-vectors-sigrid".to_string(),
+            index_name: "documents-sigrid".to_string(),
             embedding_batch_size: 32,
             vector_upload_batch_size: 100,
             max_concurrent_embeddings: 4,
@@ -85,7 +85,7 @@ impl RagPipeline {
         info!("Starting document ingestion from: {}", dir_path.display());
         
         // Process all documents in the directory
-        let documents = self.document_processor
+        let documents: Vec<Document> = self.document_processor
             .process_directory(dir_path)
             .await?;
         
@@ -97,8 +97,7 @@ impl RagPipeline {
         info!("Found {} documents to process", documents.len());
         
         // Process documents in parallel using channels
-        let (sender, receiver) = mpsc::channel::<(DocumentChunk, Vec<f32>)>();
-        let sender = std::sync::Mutex::new(sender);
+        let (sender, receiver) = unbounded::<(DocumentChunk, Vec<f32>)>();
         
         // Spawn a task to handle vector uploads
         let bucket_name = self.config.bucket_name.clone();
@@ -113,7 +112,9 @@ impl RagPipeline {
             while let Ok((chunk, embedding)) = receiver.recv() {
                 let vector = Vector {
                     key: chunk.id.clone(),
-                    vector: embedding,
+                    data: VectorData {
+                        float32: embedding,
+                    },
                     metadata: Some(chunk.metadata),
                 };
                 
@@ -126,7 +127,7 @@ impl RagPipeline {
                             debug!("Uploaded batch of {} vectors", buffer.len());
                         }
                         Err(e) => {
-                            eprintln!("Error uploading vectors: {}", e);
+                            tracing::error!("Error uploading vectors: {}", e);
                         }
                     }
                     buffer.clear();
@@ -141,7 +142,7 @@ impl RagPipeline {
                         debug!("Uploaded final batch of {} vectors", buffer.len());
                     }
                     Err(e) => {
-                        eprintln!("Error uploading final batch: {}", e);
+                        tracing::error!("Error uploading final batch: {}", e);
                     }
                 }
             }
@@ -158,7 +159,7 @@ impl RagPipeline {
                     debug!("Processed {} chunks from document: {}", chunks_processed, document.id);
                 }
                 Err(e) => {
-                    eprintln!("Error processing document {}: {}", document.id, e);
+                    tracing::error!("Error processing document {}: {:?}", document.id, e);
                 }
             }
         });
@@ -167,8 +168,7 @@ impl RagPipeline {
         drop(sender);
         
         // Wait for upload to complete
-        let runtime = tokio::runtime::Handle::current();
-        runtime.block_on(upload_handle)?;
+        upload_handle.await?;
         
         let elapsed = start_time.elapsed();
         info!("Document ingestion completed in {:?}", elapsed);
@@ -180,7 +180,7 @@ impl RagPipeline {
     fn process_document(
         &self,
         document: &Document,
-        sender: &std::sync::Mutex<mpsc::Sender<(DocumentChunk, Vec<f32>)>>,
+        sender: &Sender<(DocumentChunk, Vec<f32>)>,
         semaphore: &std::sync::Arc<Semaphore>,
     ) -> Result<usize> {
         // Split document into chunks
@@ -197,7 +197,7 @@ impl RagPipeline {
                 let embeddings = embeddings::embed_texts(&texts)?;
                 
                 for (chunk, embedding) in batch.iter().zip(embeddings.iter()) {
-                    sender.lock().unwrap().send((chunk.clone(), embedding.clone()))?;
+                    sender.send((chunk.clone(), embedding.clone()))?;
                 }
             } else {
                 // Process with permit
@@ -205,7 +205,7 @@ impl RagPipeline {
                 let embeddings = embeddings::embed_texts(&texts)?;
                 
                 for (chunk, embedding) in batch.iter().zip(embeddings.iter()) {
-                    sender.lock().unwrap().send((chunk.clone(), embedding.clone()))?;
+                    sender.send((chunk.clone(), embedding.clone()))?;
                 }
             }
         }
@@ -228,7 +228,7 @@ impl RagPipeline {
         
         // Create query request
         let query_request = QueryVectorsRequest {
-            bucket_name: self.config.bucket_name.clone(),
+            vector_bucket_name: self.config.bucket_name.clone(),
             index_name: self.config.index_name.clone(),
             query_vector: QueryVector {
                 float32: query_embedding,

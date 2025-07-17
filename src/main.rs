@@ -1,7 +1,7 @@
 use anyhow::Context;
 use s3_vectors::{
     batch_put_vectors, create_bucket_and_index, 
-    S3VectorsClient, Vector, DistanceMetric, QueryVector, QueryVectorsRequest,
+    S3VectorsClient, Vector, VectorData, DistanceMetric, QueryVector, QueryVectorsRequest,
     GetVectorsRequest, ListVectorsRequest, DeleteVectorsRequest,
 };
 use serde_json::json;
@@ -49,21 +49,23 @@ async fn main() -> anyhow::Result<()> {
     
     tracing::info!(
         "Created bucket: {} (status: {:?})",
-        bucket.bucket_name,
+        bucket.vector_bucket_name,
         bucket.status
     );
     tracing::info!(
         "Created index: {} (status: {:?}, dimensions: {})",
         index.index_name,
         index.status,
-        index.vector_dimensions
+        index.dimension
     );
 
     // Create sample vectors
     let vectors = vec![
         Vector {
             key: "product-1".to_string(),
-            vector: vec![0.1; dimensions as usize],
+            data: VectorData {
+                float32: vec![0.1; dimensions as usize],
+            },
             metadata: Some(json!({
                 "name": "Laptop Pro 2024",
                 "category": "electronics",
@@ -75,7 +77,9 @@ async fn main() -> anyhow::Result<()> {
         },
         Vector {
             key: "product-2".to_string(),
-            vector: vec![0.2; dimensions as usize],
+            data: VectorData {
+                float32: vec![0.2; dimensions as usize],
+            },
             metadata: Some(json!({
                 "name": "Smartphone X",
                 "category": "electronics",
@@ -87,7 +91,9 @@ async fn main() -> anyhow::Result<()> {
         },
         Vector {
             key: "product-3".to_string(),
-            vector: vec![0.3; dimensions as usize],
+            data: VectorData {
+                float32: vec![0.3; dimensions as usize],
+            },
             metadata: Some(json!({
                 "name": "Wireless Headphones",
                 "category": "electronics",
@@ -99,7 +105,9 @@ async fn main() -> anyhow::Result<()> {
         },
         Vector {
             key: "product-4".to_string(),
-            vector: vec![0.15; dimensions as usize],
+            data: VectorData {
+                float32: vec![0.15; dimensions as usize],
+            },
             metadata: Some(json!({
                 "name": "Tablet Ultra",
                 "category": "electronics",
@@ -120,7 +128,7 @@ async fn main() -> anyhow::Result<()> {
     // List vectors
     tracing::info!("Listing vectors...");
     let list_request = ListVectorsRequest {
-        bucket_name: bucket_name.to_string(),
+        vector_bucket_name: bucket_name.to_string(),
         index_name: index_name.to_string(),
         max_results: Some(10),
         next_token: None,
@@ -139,7 +147,7 @@ async fn main() -> anyhow::Result<()> {
     // Get specific vectors
     tracing::info!("Getting specific vectors...");
     let get_request = GetVectorsRequest {
-        bucket_name: bucket_name.to_string(),
+        vector_bucket_name: bucket_name.to_string(),
         index_name: index_name.to_string(),
         keys: vec!["product-1".to_string(), "product-3".to_string()],
         return_vector: true,
@@ -165,7 +173,7 @@ async fn main() -> anyhow::Result<()> {
     
     // Query 1: Find similar products in stock
     let query_request1 = QueryVectorsRequest {
-        bucket_name: bucket_name.to_string(),
+        vector_bucket_name: bucket_name.to_string(),
         index_name: index_name.to_string(),
         query_vector: QueryVector {
             float32: vec![0.12; dimensions as usize], // Similar to product-1
@@ -195,7 +203,7 @@ async fn main() -> anyhow::Result<()> {
 
     // Query 2: Find products by brand
     let query_request2 = QueryVectorsRequest {
-        bucket_name: bucket_name.to_string(),
+        vector_bucket_name: bucket_name.to_string(),
         index_name: index_name.to_string(),
         query_vector: QueryVector {
             float32: vec![0.25; dimensions as usize],
@@ -228,7 +236,7 @@ async fn main() -> anyhow::Result<()> {
 
     // Query 3: Price range filter
     let query_request3 = QueryVectorsRequest {
-        bucket_name: bucket_name.to_string(),
+        vector_bucket_name: bucket_name.to_string(),
         index_name: index_name.to_string(),
         query_vector: QueryVector {
             float32: vec![0.18; dimensions as usize],
@@ -272,9 +280,8 @@ async fn main() -> anyhow::Result<()> {
     tracing::info!("Found {} vector buckets", buckets_response.buckets.len());
     for bucket in &buckets_response.buckets {
         tracing::info!(
-            "  - {} (region: {}, status: {:?})",
-            bucket.bucket_name,
-            bucket.region,
+            "  - {} (status: {:?})",
+            bucket.vector_bucket_name,
             bucket.status
         );
     }
@@ -291,7 +298,7 @@ async fn main() -> anyhow::Result<()> {
         tracing::info!(
             "  - {} (dimensions: {}, metric: {:?}, vectors: {:?})",
             index.index_name,
-            index.vector_dimensions,
+            index.dimension,
             index.distance_metric,
             index.vector_count
         );
@@ -300,7 +307,7 @@ async fn main() -> anyhow::Result<()> {
     // Delete some vectors
     tracing::info!("Deleting vector product-3...");
     let delete_request = DeleteVectorsRequest {
-        bucket_name: bucket_name.to_string(),
+        vector_bucket_name: bucket_name.to_string(),
         index_name: index_name.to_string(),
         keys: vec!["product-3".to_string()],
     };

@@ -1,3 +1,6 @@
 .idea/
 shuttle/
 target/
+test_documents/
+models/
+.DS_Store

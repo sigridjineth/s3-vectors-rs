@@ -1,17 +1,7 @@
 use anyhow::Result;
 use chrono::Utc;
 use hmac::{Hmac, Mac};
-use percent_encoding::{AsciiSet, CONTROLS};
 use sha2::{Digest, Sha256};
-
-const FRAGMENT: &AsciiSet = &CONTROLS
-    .add(b' ')
-    .add(b'"')
-    .add(b'<')
-    .add(b'>')
-    .add(b'`');
-
-const PATH_SAFE: &AsciiSet = &FRAGMENT.add(b'#').add(b'?').add(b'{').add(b'}');
 
 type HmacSha256 = Hmac<Sha256>;
 
@@ -49,8 +39,19 @@ impl AwsV4Signer {
         let date_stamp = now.format("%Y%m%d").to_string();
         let time_stamp = now.format("%Y%m%dT%H%M%SZ").to_string();
 
+        // Extract host from URL
+        let url_parsed = url::Url::parse(url).map_err(|e| anyhow::anyhow!("Failed to parse URL: {}", e))?;
+        let host = match url_parsed.port() {
+            Some(port) => format!("{}:{}", url_parsed.host_str()
+                .ok_or_else(|| anyhow::anyhow!("URL has no host"))?, port),
+            None => url_parsed.host_str()
+                .ok_or_else(|| anyhow::anyhow!("URL has no host"))?
+                .to_string(),
+        };
+        
         // Build headers map
         let mut signed_headers = headers;
+        signed_headers.insert("host".to_string(), host);
         signed_headers.insert("x-amz-date".to_string(), time_stamp.clone());
         
         if let Some(token) = &self.session_token {
@@ -62,12 +63,7 @@ impl AwsV4Signer {
         signed_headers.insert("x-amz-content-sha256".to_string(), payload_hash.clone());
 
         // Extract URI from URL
-        let url_parts: Vec<&str> = url.splitn(4, '/').collect();
-        let uri = if url_parts.len() >= 4 {
-            format!("/{}", url_parts[3])
-        } else {
-            "/".to_string()
-        };
+        let uri = url_parsed.path().to_string();
 
         // Create canonical request
         let canonical_headers = self.create_canonical_headers_map(&signed_headers);
@@ -105,26 +101,6 @@ impl AwsV4Signer {
         Ok(signed_headers)
     }
 
-    fn create_canonical_headers(&self, headers: &reqwest::header::HeaderMap) -> String {
-        let mut canonical = Vec::new();
-        for (key, value) in headers {
-            let key_str = key.as_str().to_lowercase();
-            let value_str = value.to_str().unwrap_or("");
-            canonical.push(format!("{}:{}", key_str, value_str.trim()));
-        }
-        canonical.sort();
-        canonical.join("\n") + "\n"
-    }
-
-    fn get_signed_headers(&self, headers: &reqwest::header::HeaderMap) -> String {
-        let mut signed = Vec::new();
-        for (key, _) in headers {
-            signed.push(key.as_str().to_lowercase());
-        }
-        signed.sort();
-        signed.join(";")
-    }
-    
     fn create_canonical_headers_map(&self, headers: &std::collections::HashMap<String, String>) -> String {
         let mut canonical = Vec::new();
         for (key, value) in headers {

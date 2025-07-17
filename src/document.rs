@@ -1,4 +1,5 @@
 use anyhow::{Context, Result};
+use lazy_static::lazy_static;
 use regex::Regex;
 use serde::{Deserialize, Serialize};
 use std::path::Path;
@@ -109,6 +110,18 @@ impl DocumentProcessor {
         let mut document_chunks = Vec::new();
         
         for (index, chunk_content) in chunks.into_iter().enumerate() {
+            // Truncate content for metadata to avoid exceeding S3 Vectors limit
+            let content_preview = if chunk_content.len() > 500 {
+                // Find a safe UTF-8 boundary at or before 500 bytes
+                let mut truncate_pos = 500;
+                while truncate_pos > 0 && !chunk_content.is_char_boundary(truncate_pos) {
+                    truncate_pos -= 1;
+                }
+                format!("{}...", &chunk_content[..truncate_pos])
+            } else {
+                chunk_content.clone()
+            };
+            
             let chunk_metadata = serde_json::json!({
                 "document_id": document.id,
                 "document_path": document.path,
@@ -117,6 +130,7 @@ impl DocumentProcessor {
                 "chunk_index": index,
                 "total_chunks": total_chunks,
                 "created_at": document.metadata.created_at,
+                "content": content_preview,
             });
             
             let chunk = DocumentChunk {
@@ -185,7 +199,7 @@ impl DocumentProcessor {
                                 documents.push(doc);
                             }
                             Err(e) => {
-                                eprintln!("Error processing {}: {}", path.display(), e);
+                                tracing::error!("Error processing {}: {}", path.display(), e);
                             }
                         }
                     }
@@ -218,15 +232,18 @@ pub fn extract_title(content: &str) -> Option<String> {
         .map(|line| line.trim().to_string())
 }
 
+lazy_static! {
+    static ref WHITESPACE_REGEX: Regex = Regex::new(r"\s+").unwrap();
+    static ref SPECIAL_REGEX: Regex = Regex::new(r#"[^\w\s\.\,\!\?\-\'\"]"#).unwrap();
+}
+
 /// Clean and normalize text content
 pub fn clean_text(text: &str) -> String {
     // Remove multiple whitespaces
-    let whitespace_regex = Regex::new(r"\s+").unwrap();
-    let cleaned = whitespace_regex.replace_all(text, " ");
+    let cleaned = WHITESPACE_REGEX.replace_all(text, " ");
     
     // Remove special characters that might interfere with embedding
-    let special_regex = Regex::new(r#"[^\w\s\.\,\!\?\-\'\"]"#).unwrap();
-    let cleaned = special_regex.replace_all(&cleaned, " ");
+    let cleaned = SPECIAL_REGEX.replace_all(&cleaned, " ");
     
     cleaned.trim().to_string()
 }

@@ -14,7 +14,7 @@ use tracing::{debug, error, info, warn};
 const MAX_RETRIES: u32 = 3;
 const INITIAL_BACKOFF_MS: u64 = 100;
 const MAX_BACKOFF_MS: u64 = 5000;
-const MAX_BATCH_SIZE: usize = 100;
+const MAX_BATCH_SIZE: usize = 500;
 
 #[derive(Debug, thiserror::Error)]
 pub enum S3VectorsError {
@@ -49,7 +49,6 @@ pub enum S3VectorsError {
 impl S3VectorsClient {
     async fn execute_request<T: DeserializeOwned>(
         &self,
-        method: reqwest::Method,
         path: &str,
         body: Option<impl Serialize>,
     ) -> Result<T, S3VectorsError> {
@@ -62,7 +61,7 @@ impl S3VectorsClient {
         let mut backoff = INITIAL_BACKOFF_MS;
         
         loop {
-            let mut request = HTTP_CLIENT.request(method.clone(), &url);
+            let mut request = HTTP_CLIENT.request(reqwest::Method::POST, &url);
             
             // Add body if present
             let body_bytes = if let Some(ref body) = body {
@@ -75,7 +74,7 @@ impl S3VectorsClient {
             
             // Sign the request
             let headers = signer.sign_request(
-                &method.as_str(),
+                "POST",
                 &url,
                 HashMap::new(),
                 &body_bytes,
@@ -85,9 +84,9 @@ impl S3VectorsClient {
                 request = request.header(key, value);
             }
             
-            request = request.header("Content-Type", "application/x-amz-json-1.0");
+            request = request.header("Content-Type", "application/json");
             
-            debug!("Executing {} request to {}", method, path);
+            debug!("Executing request to {}", path);
             let response = request.send().await?;
             let status = response.status();
             
@@ -106,7 +105,15 @@ impl S3VectorsClient {
                         return Err(S3VectorsError::NotFound(service_error.message));
                     }
                     StatusCode::CONFLICT => {
-                        return Err(S3VectorsError::AlreadyExists(service_error.message));
+                        if let Some(error_type) = service_error.error_type {
+                            if error_type.contains("ConflictException") || error_type.contains("AlreadyExistsException") {
+                                return Err(S3VectorsError::AlreadyExists(service_error.message));
+                            } else {
+                                return Err(S3VectorsError::ServiceError(service_error.message));
+                            }
+                        } else {
+                            return Err(S3VectorsError::ServiceError(service_error.message));
+                        }
                     }
                     StatusCode::TOO_MANY_REQUESTS => {
                         if retries < MAX_RETRIES {
@@ -144,28 +151,31 @@ impl S3VectorsClient {
             .map_err(|e| S3VectorsError::Validation(e.to_string()))?;
         
         let request = CreateVectorBucketRequest {
-            bucket_name: bucket_name.to_string(),
+            vector_bucket_name: bucket_name.to_string(),
         };
         
         info!("Creating vector bucket: {}", bucket_name);
-        let response: CreateVectorBucketResponse = self.execute_request(
-            reqwest::Method::POST,
-            "/v1/vectorbuckets",
+        let _: CreateVectorBucketResponse = self.execute_request(
+            "/CreateVectorBucket",
             Some(request),
         ).await?;
         
-        Ok(response.bucket)
+        // The API returns empty response body, so we need to describe the bucket to get its details
+        self.describe_vector_bucket(bucket_name).await
     }
     
     pub async fn delete_vector_bucket(&self, bucket_name: &str) -> Result<(), S3VectorsError> {
         validate_bucket_name(bucket_name)
             .map_err(|e| S3VectorsError::Validation(e.to_string()))?;
         
+        let request = DeleteVectorBucketRequest {
+            vector_bucket_name: bucket_name.to_string(),
+        };
+        
         info!("Deleting vector bucket: {}", bucket_name);
         self.execute_request::<serde_json::Value>(
-            reqwest::Method::DELETE,
-            &format!("/v1/vectorbuckets/{}", bucket_name),
-            None::<()>,
+            "/DeleteVectorBucket",
+            Some(request),
         ).await?;
         
         Ok(())
@@ -183,8 +193,7 @@ impl S3VectorsClient {
         
         info!("Listing vector buckets");
         self.execute_request(
-            reqwest::Method::POST,
-            "/v1/vectorbuckets/list",
+            "/ListVectorBuckets",
             Some(request),
         ).await
     }
@@ -193,29 +202,44 @@ impl S3VectorsClient {
         validate_bucket_name(bucket_name)
             .map_err(|e| S3VectorsError::Validation(e.to_string()))?;
         
+        let request = serde_json::json!({
+            "vectorBucketName": bucket_name
+        });
+        
         info!("Describing vector bucket: {}", bucket_name);
-        self.execute_request(
-            reqwest::Method::GET,
-            &format!("/v1/vectorbuckets/{}", bucket_name),
-            None::<()>,
-        ).await
+        let response: serde_json::Value = self.execute_request(
+            "/GetVectorBucket",
+            Some(request),
+        ).await?;
+        
+        debug!("Raw response from /GetVectorBucket: {:?}", response);
+        
+        // Extract the vectorBucket field from response
+        let bucket: VectorBucket = serde_json::from_value(
+            response.get("vectorBucket")
+                .ok_or_else(|| S3VectorsError::ServiceError("Missing vectorBucket in response".to_string()))?
+                .clone()
+        )?;
+        
+        Ok(bucket)
     }
     
     // Index operations
-    pub async fn create_index(&self, request: CreateIndexRequest) -> Result<VectorIndex, S3VectorsError> {
-        validate_bucket_name(&request.bucket_name)
+    pub async fn create_index(&self, request: CreateIndexRequest) -> Result<(), S3VectorsError> {
+        validate_bucket_name(&request.vector_bucket_name)
             .map_err(|e| S3VectorsError::Validation(e.to_string()))?;
         validate_index_name(&request.index_name)
             .map_err(|e| S3VectorsError::Validation(e.to_string()))?;
-        validate_dimensions(request.vector_dimensions)
+        validate_dimensions(request.dimension)
             .map_err(|e| S3VectorsError::Validation(e.to_string()))?;
         
-        info!("Creating index {} in bucket {}", request.index_name, request.bucket_name);
-        self.execute_request(
-            reqwest::Method::POST,
-            &format!("/v1/vectorbuckets/{}/indexes", request.bucket_name),
+        info!("Creating index {} in bucket {}", request.index_name, request.vector_bucket_name);
+        let _: serde_json::Value = self.execute_request(
+            "/CreateIndex",
             Some(request),
-        ).await
+        ).await?;
+        
+        Ok(())
     }
     
     pub async fn delete_index(&self, bucket_name: &str, index_name: &str) -> Result<(), S3VectorsError> {
@@ -225,10 +249,13 @@ impl S3VectorsClient {
             .map_err(|e| S3VectorsError::Validation(e.to_string()))?;
         
         info!("Deleting index {} from bucket {}", index_name, bucket_name);
+        let request = DeleteIndexRequest {
+            vector_bucket_name: bucket_name.to_string(),
+            index_name: index_name.to_string(),
+        };
         self.execute_request::<serde_json::Value>(
-            reqwest::Method::DELETE,
-            &format!("/v1/vectorbuckets/{}/indexes/{}", bucket_name, index_name),
-            None::<()>,
+            "/DeleteIndex",
+            Some(request),
         ).await?;
         
         Ok(())
@@ -244,15 +271,14 @@ impl S3VectorsClient {
             .map_err(|e| S3VectorsError::Validation(e.to_string()))?;
         
         let request = ListIndexesRequest {
-            bucket_name: bucket_name.to_string(),
+            vector_bucket_name: bucket_name.to_string(),
             max_results,
             next_token,
         };
         
         info!("Listing indexes in bucket {}", bucket_name);
         self.execute_request(
-            reqwest::Method::POST,
-            &format!("/v1/vectorbuckets/{}/indexes/list", bucket_name),
+            "/ListIndexes",
             Some(request),
         ).await
     }
@@ -264,16 +290,31 @@ impl S3VectorsClient {
             .map_err(|e| S3VectorsError::Validation(e.to_string()))?;
         
         info!("Describing index {} in bucket {}", index_name, bucket_name);
-        self.execute_request(
-            reqwest::Method::GET,
-            &format!("/v1/vectorbuckets/{}/indexes/{}", bucket_name, index_name),
-            None::<()>,
-        ).await
+        let request = serde_json::json!({
+            "vectorBucketName": bucket_name,
+            "indexName": index_name
+        });
+        
+        let response: serde_json::Value = self.execute_request(
+            "/GetIndex",
+            Some(request),
+        ).await?;
+        
+        debug!("Raw response from /GetIndex: {:?}", response);
+        
+        // Extract the index field from response
+        let index: VectorIndex = serde_json::from_value(
+            response.get("index")
+                .ok_or_else(|| S3VectorsError::ServiceError("Missing index in response".to_string()))?
+                .clone()
+        )?;
+        
+        Ok(index)
     }
     
     // Vector operations
     pub async fn put_vectors(&self, request: PutVectorsRequest) -> Result<(), S3VectorsError> {
-        validate_bucket_name(&request.bucket_name)
+        validate_bucket_name(&request.vector_bucket_name)
             .map_err(|e| S3VectorsError::Validation(e.to_string()))?;
         validate_index_name(&request.index_name)
             .map_err(|e| S3VectorsError::Validation(e.to_string()))?;
@@ -291,12 +332,10 @@ impl S3VectorsClient {
         }
         
         info!("Putting {} vectors to index {} in bucket {}", 
-            request.vectors.len(), request.index_name, request.bucket_name);
+            request.vectors.len(), request.index_name, request.vector_bucket_name);
         
         self.execute_request::<serde_json::Value>(
-            reqwest::Method::POST,
-            &format!("/v1/vectorbuckets/{}/indexes/{}/vectors", 
-                request.bucket_name, request.index_name),
+            "/PutVectors",
             Some(request),
         ).await?;
         
@@ -304,7 +343,7 @@ impl S3VectorsClient {
     }
     
     pub async fn get_vectors(&self, request: GetVectorsRequest) -> Result<GetVectorsResponse, S3VectorsError> {
-        validate_bucket_name(&request.bucket_name)
+        validate_bucket_name(&request.vector_bucket_name)
             .map_err(|e| S3VectorsError::Validation(e.to_string()))?;
         validate_index_name(&request.index_name)
             .map_err(|e| S3VectorsError::Validation(e.to_string()))?;
@@ -314,18 +353,16 @@ impl S3VectorsClient {
         }
         
         info!("Getting {} vectors from index {} in bucket {}", 
-            request.keys.len(), request.index_name, request.bucket_name);
+            request.keys.len(), request.index_name, request.vector_bucket_name);
         
         self.execute_request(
-            reqwest::Method::POST,
-            &format!("/v1/vectorbuckets/{}/indexes/{}/vectors/get", 
-                request.bucket_name, request.index_name),
+            "/GetVectors",
             Some(request),
         ).await
     }
     
     pub async fn delete_vectors(&self, request: DeleteVectorsRequest) -> Result<(), S3VectorsError> {
-        validate_bucket_name(&request.bucket_name)
+        validate_bucket_name(&request.vector_bucket_name)
             .map_err(|e| S3VectorsError::Validation(e.to_string()))?;
         validate_index_name(&request.index_name)
             .map_err(|e| S3VectorsError::Validation(e.to_string()))?;
@@ -335,12 +372,10 @@ impl S3VectorsClient {
         }
         
         info!("Deleting {} vectors from index {} in bucket {}", 
-            request.keys.len(), request.index_name, request.bucket_name);
+            request.keys.len(), request.index_name, request.vector_bucket_name);
         
         self.execute_request::<serde_json::Value>(
-            reqwest::Method::POST,
-            &format!("/v1/vectorbuckets/{}/indexes/{}/vectors/delete", 
-                request.bucket_name, request.index_name),
+            "/DeleteVectors",
             Some(request),
         ).await?;
         
@@ -351,35 +386,50 @@ impl S3VectorsClient {
         &self,
         request: ListVectorsRequest,
     ) -> Result<ListVectorsResponse, S3VectorsError> {
-        validate_bucket_name(&request.bucket_name)
+        validate_bucket_name(&request.vector_bucket_name)
             .map_err(|e| S3VectorsError::Validation(e.to_string()))?;
         validate_index_name(&request.index_name)
             .map_err(|e| S3VectorsError::Validation(e.to_string()))?;
         
         info!("Listing vectors in index {} of bucket {}", 
-            request.index_name, request.bucket_name);
+            request.index_name, request.vector_bucket_name);
         
         self.execute_request(
-            reqwest::Method::POST,
-            &format!("/v1/vectorbuckets/{}/indexes/{}/vectors/list", 
-                request.bucket_name, request.index_name),
+            "/ListVectors",
             Some(request),
         ).await
     }
     
     pub async fn query_vectors(&self, request: QueryVectorsRequest) -> Result<QueryVectorsResponse, S3VectorsError> {
-        validate_bucket_name(&request.bucket_name)
+        validate_bucket_name(&request.vector_bucket_name)
             .map_err(|e| S3VectorsError::Validation(e.to_string()))?;
         validate_index_name(&request.index_name)
             .map_err(|e| S3VectorsError::Validation(e.to_string()))?;
         
         info!("Querying vectors in index {} of bucket {}", 
-            request.index_name, request.bucket_name);
+            request.index_name, request.vector_bucket_name);
         
         self.execute_request(
-            reqwest::Method::POST,
-            &format!("/v1/vectorbuckets/{}/indexes/{}/query", 
-                request.bucket_name, request.index_name),
+            "/QueryVectors",
+            Some(request),
+        ).await
+    }
+    
+    pub async fn get_index(&self, vector_bucket_name: &str, index_name: &str) -> Result<GetIndexResponse, S3VectorsError> {
+        validate_bucket_name(vector_bucket_name)
+            .map_err(|e| S3VectorsError::Validation(e.to_string()))?;
+        validate_index_name(index_name)
+            .map_err(|e| S3VectorsError::Validation(e.to_string()))?;
+        
+        let request = GetIndexRequest {
+            vector_bucket_name: vector_bucket_name.to_string(),
+            index_name: index_name.to_string(),
+        };
+        
+        info!("Getting index {} in bucket {}", index_name, vector_bucket_name);
+        
+        self.execute_request(
+            "/GetIndex",
             Some(request),
         ).await
     }
@@ -395,39 +445,55 @@ pub async fn create_bucket_and_index(
 ) -> Result<(VectorBucket, VectorIndex)> {
     info!("Creating bucket {} and index {}", bucket_name, index_name);
     
-    // Create bucket
-    let _bucket = match client.create_vector_bucket(bucket_name).await {
-        Ok(b) => b,
-        Err(S3VectorsError::AlreadyExists(_)) => {
+    // Try to describe the bucket first
+    let bucket = match client.describe_vector_bucket(bucket_name).await {
+        Ok(b) => {
             info!("Bucket {} already exists, using existing", bucket_name);
-            client.describe_vector_bucket(bucket_name).await?
-        }
+            // Existing buckets are already active, no need to wait
+            b
+        },
+        Err(S3VectorsError::NotFound(_)) => {
+            // If not found, try to create it
+            match client.create_vector_bucket(bucket_name).await {
+                Ok(_) => {
+                    info!("Bucket {} created successfully", bucket_name);
+                    // Wait for newly created bucket to be active
+                    wait_for_bucket_active(client, bucket_name).await?
+                },
+                Err(S3VectorsError::AlreadyExists(_)) => {
+                    // Race condition: bucket was created by another process
+                    info!("Bucket {} was created by another process, describing existing", bucket_name);
+                    client.describe_vector_bucket(bucket_name).await?
+                },
+                Err(e) => return Err(e.into()),
+            }
+        },
         Err(e) => return Err(e.into()),
     };
-    
-    // Wait for bucket to be active
-    let bucket = wait_for_bucket_active(client, bucket_name).await?;
     
     // Create index
     let index_request = CreateIndexRequest {
-        bucket_name: bucket_name.to_string(),
+        vector_bucket_name: bucket_name.to_string(),
         index_name: index_name.to_string(),
-        vector_dimensions: dimensions,
+        dimension: dimensions,
+        data_type: DataType::Float32,
         distance_metric,
-        metadata_fields: None,
+        metadata_configuration: None,
     };
     
-    let _index = match client.create_index(index_request).await {
-        Ok(i) => i,
+    let index = match client.create_index(index_request).await {
+        Ok(()) => {
+            info!("Index {} created successfully", index_name);
+            // Wait for newly created index to be active
+            wait_for_index_active(client, bucket_name, index_name).await?
+        },
         Err(S3VectorsError::AlreadyExists(_)) => {
             info!("Index {} already exists, using existing", index_name);
+            // Existing indexes are already active, just describe it
             client.describe_index(bucket_name, index_name).await?
-        }
+        },
         Err(e) => return Err(e.into()),
     };
-    
-    // Wait for index to be active
-    let index = wait_for_index_active(client, bucket_name, index_name).await?;
     
     Ok((bucket, index))
 }
@@ -447,7 +513,7 @@ pub async fn batch_put_vectors(
     // Process in batches
     for chunk in vectors.chunks(MAX_BATCH_SIZE) {
         let request = PutVectorsRequest {
-            bucket_name: bucket_name.to_string(),
+            vector_bucket_name: bucket_name.to_string(),
             index_name: index_name.to_string(),
             vectors: chunk.to_vec(),
         };
@@ -473,14 +539,20 @@ async fn wait_for_bucket_active(
     for _ in 0..60 {
         let bucket = client.describe_vector_bucket(bucket_name).await?;
         match bucket.status {
-            BucketStatus::Active => {
+            Some(BucketStatus::Active) => {
                 info!("Bucket {} is active", bucket_name);
                 return Ok(bucket);
             }
-            BucketStatus::Failed => {
+            Some(BucketStatus::Failed) => {
+                error!("Bucket {} creation failed with status: Failed", bucket_name);
                 return Err(anyhow::anyhow!("Bucket creation failed"));
             }
-            _ => {
+            Some(s) => {
+                info!("Bucket {} current status: {:?}", bucket_name, s);
+                sleep(Duration::from_secs(1)).await;
+            }
+            None => {
+                info!("Bucket {} status is None, assuming in-progress", bucket_name);
                 sleep(Duration::from_secs(1)).await;
             }
         }
@@ -496,21 +568,18 @@ async fn wait_for_index_active(
 ) -> Result<VectorIndex> {
     info!("Waiting for index {} to become active", index_name);
     
-    for _ in 0..60 {
-        let index = client.describe_index(bucket_name, index_name).await?;
-        match index.status {
-            IndexStatus::Active => {
-                info!("Index {} is active", index_name);
-                return Ok(index);
-            }
-            IndexStatus::Failed => {
-                return Err(anyhow::anyhow!("Index creation failed"));
-            }
-            _ => {
-                sleep(Duration::from_secs(1)).await;
-            }
+    // Give it a moment for the index to be created
+    sleep(Duration::from_secs(2)).await;
+    
+    // Try to describe the index - if it exists, consider it active
+    match client.describe_index(bucket_name, index_name).await {
+        Ok(index) => {
+            info!("Index {} is available", index_name);
+            Ok(index)
+        }
+        Err(e) => {
+            error!("Failed to describe index {}: {:?}", index_name, e);
+            Err(anyhow::anyhow!("Failed to verify index creation: {}", e))
         }
     }
-    
-    Err(anyhow::anyhow!("Timeout waiting for index to become active"))
 }
