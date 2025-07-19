@@ -40,20 +40,26 @@ impl AwsV4Signer {
         let time_stamp = now.format("%Y%m%dT%H%M%SZ").to_string();
 
         // Extract host from URL
-        let url_parsed = url::Url::parse(url).map_err(|e| anyhow::anyhow!("Failed to parse URL: {}", e))?;
+        let url_parsed =
+            url::Url::parse(url).map_err(|e| anyhow::anyhow!("Failed to parse URL: {e}"))?;
         let host = match url_parsed.port() {
-            Some(port) => format!("{}:{}", url_parsed.host_str()
-                .ok_or_else(|| anyhow::anyhow!("URL has no host"))?, port),
-            None => url_parsed.host_str()
+            Some(port) => format!(
+                "{}:{port}",
+                url_parsed
+                    .host_str()
+                    .ok_or_else(|| anyhow::anyhow!("URL has no host"))?
+            ),
+            None => url_parsed
+                .host_str()
                 .ok_or_else(|| anyhow::anyhow!("URL has no host"))?
                 .to_string(),
         };
-        
+
         // Build headers map
         let mut signed_headers = headers;
         signed_headers.insert("host".to_string(), host);
         signed_headers.insert("x-amz-date".to_string(), time_stamp.clone());
-        
+
         if let Some(token) = &self.session_token {
             signed_headers.insert("x-amz-security-token".to_string(), token.clone());
         }
@@ -68,32 +74,25 @@ impl AwsV4Signer {
         // Create canonical request
         let canonical_headers = self.create_canonical_headers_map(&signed_headers);
         let signed_headers_str = self.get_signed_headers_map(&signed_headers);
-        
+
         let canonical_request = format!(
-            "{}\n{}\n{}\n{}\n{}\n{}",
-            method,
-            uri,
+            "{method}\n{uri}\n{}\n{canonical_headers}\n{signed_headers_str}\n{payload_hash}",
             "", // query string
-            canonical_headers,
-            signed_headers_str,
-            payload_hash
         );
 
         // Create string to sign
         let request_hash = hex::encode(Sha256::digest(canonical_request.as_bytes()));
-        let credential_scope = format!("{}/{}/s3vectors/aws4_request", date_stamp, self.region);
-        let string_to_sign = format!(
-            "AWS4-HMAC-SHA256\n{}\n{}\n{}",
-            time_stamp, credential_scope, request_hash
-        );
+        let credential_scope = format!("{date_stamp}/{}/s3vectors/aws4_request", self.region);
+        let string_to_sign =
+            format!("AWS4-HMAC-SHA256\n{time_stamp}\n{credential_scope}\n{request_hash}");
 
         // Calculate signature
         let signature = self.calculate_signature(&date_stamp, &string_to_sign)?;
 
         // Create authorization header
         let auth_header = format!(
-            "AWS4-HMAC-SHA256 Credential={}/{}, SignedHeaders={}, Signature={}",
-            self.access_key_id, credential_scope, signed_headers_str, signature
+            "AWS4-HMAC-SHA256 Credential={}/{credential_scope}, SignedHeaders={signed_headers_str}, Signature={signature}",
+            self.access_key_id
         );
 
         signed_headers.insert("authorization".to_string(), auth_header);
@@ -101,19 +100,25 @@ impl AwsV4Signer {
         Ok(signed_headers)
     }
 
-    fn create_canonical_headers_map(&self, headers: &std::collections::HashMap<String, String>) -> String {
+    fn create_canonical_headers_map(
+        &self,
+        headers: &std::collections::HashMap<String, String>,
+    ) -> String {
         let mut canonical = Vec::new();
         for (key, value) in headers {
             let key_str = key.to_lowercase();
-            canonical.push(format!("{}:{}", key_str, value.trim()));
+            canonical.push(format!("{key_str}:{}", value.trim()));
         }
         canonical.sort();
         canonical.join("\n") + "\n"
     }
 
-    fn get_signed_headers_map(&self, headers: &std::collections::HashMap<String, String>) -> String {
+    fn get_signed_headers_map(
+        &self,
+        headers: &std::collections::HashMap<String, String>,
+    ) -> String {
         let mut signed = Vec::new();
-        for (key, _) in headers {
+        for key in headers.keys() {
             signed.push(key.to_lowercase());
         }
         signed.sort();
@@ -127,14 +132,14 @@ impl AwsV4Signer {
         let k_service = sign(&k_region, b"s3vectors")?;
         let k_signing = sign(&k_service, b"aws4_request")?;
         let signature = sign(&k_signing, string_to_sign.as_bytes())?;
-        
+
         Ok(hex::encode(signature))
     }
 }
 
 fn sign(key: &[u8], msg: &[u8]) -> Result<Vec<u8>> {
     let mut mac = HmacSha256::new_from_slice(key)
-        .map_err(|e| anyhow::anyhow!("Failed to create HMAC: {}", e))?;
+        .map_err(|e| anyhow::anyhow!("Failed to create HMAC: {e}"))?;
     mac.update(msg);
     Ok(mac.finalize().into_bytes().to_vec())
 }

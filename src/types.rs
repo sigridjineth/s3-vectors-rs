@@ -2,8 +2,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 // Enums
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
-#[derive(clap::ValueEnum)]
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, clap::ValueEnum)]
 pub enum BucketStatus {
     Creating,
     Active,
@@ -19,29 +18,19 @@ pub enum IndexStatus {
     Failed,
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Default)]
 #[serde(rename_all = "lowercase")]
 pub enum DataType {
+    #[default]
     Float32,
 }
 
-impl Default for DataType {
-    fn default() -> Self {
-        DataType::Float32
-    }
-}
-
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Default)]
 #[serde(rename_all = "lowercase")]
 pub enum DistanceMetric {
+    #[default]
     Cosine,
     Euclidean,
-}
-
-impl Default for DistanceMetric {
-    fn default() -> Self {
-        DistanceMetric::Cosine
-    }
 }
 
 // Vector bucket types
@@ -245,7 +234,7 @@ impl Vector {
                 self.data.float32.len()
             );
         }
-        
+
         // Validate that vector values are not NaN or Infinity
         for (i, &value) in self.data.float32.iter().enumerate() {
             if value.is_nan() {
@@ -255,14 +244,14 @@ impl Vector {
                 anyhow::bail!("Vector contains infinite value at index {}", i);
             }
         }
-        
+
         if let Some(ref metadata) = self.metadata {
             let size = serde_json::to_vec(metadata)?.len();
             if size > 40960 {
                 anyhow::bail!("Metadata size exceeds 40KB limit: {} bytes", size);
             }
         }
-        
+
         Ok(())
     }
 }

@@ -1,5 +1,5 @@
-use std::sync::LazyLock;
 use std::fmt;
+use std::sync::LazyLock;
 
 use anyhow::{Context, Result};
 use serde::Deserialize;
@@ -17,9 +17,21 @@ impl fmt::Debug for Config {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("Config")
             .field("aws_region", &self.aws_region)
-            .field("aws_access_key_id", &self.aws_access_key_id.as_ref().map(|_| "***REDACTED***"))
-            .field("aws_secret_access_key", &self.aws_secret_access_key.as_ref().map(|_| "***REDACTED***"))
-            .field("aws_session_token", &self.aws_session_token.as_ref().map(|_| "***REDACTED***"))
+            .field(
+                "aws_access_key_id",
+                &self.aws_access_key_id.as_ref().map(|_| "***REDACTED***"),
+            )
+            .field(
+                "aws_secret_access_key",
+                &self
+                    .aws_secret_access_key
+                    .as_ref()
+                    .map(|_| "***REDACTED***"),
+            )
+            .field(
+                "aws_session_token",
+                &self.aws_session_token.as_ref().map(|_| "***REDACTED***"),
+            )
             .finish()
     }
 }
@@ -49,7 +61,7 @@ pub fn get_config() -> Config {
             aws_access_key_id: None,
             aws_secret_access_key: None,
             aws_session_token: None,
-        }
+        },
     }
 }
 
@@ -65,26 +77,38 @@ mod tests {
             aws_secret_access_key: Some("secret123".to_string()),
             aws_session_token: Some("token456".to_string()),
         };
-        
+
         let debug_output = format!("{:?}", config);
-        
+
         // These assertions will fail until we implement custom Debug
-        assert!(!debug_output.contains("secret123"), "Secret key should be redacted");
-        assert!(!debug_output.contains("token456"), "Session token should be redacted");
-        assert!(debug_output.contains("***REDACTED***"), "Should show REDACTED for sensitive fields");
-        assert!(debug_output.contains("us-east-1"), "Region should be visible");
+        assert!(
+            !debug_output.contains("secret123"),
+            "Secret key should be redacted"
+        );
+        assert!(
+            !debug_output.contains("token456"),
+            "Session token should be redacted"
+        );
+        assert!(
+            debug_output.contains("***REDACTED***"),
+            "Should show REDACTED for sensitive fields"
+        );
+        assert!(
+            debug_output.contains("us-east-1"),
+            "Region should be visible"
+        );
     }
-    
+
     #[test]
     fn test_get_config_returns_defaults_on_error() {
         // Test that get_config handles both scenarios:
         // 1. When env vars are not set (returns defaults)
         // 2. When env vars are set (returns actual values)
         let config = get_config();
-        
+
         // Region should always have a value (either from env or default)
         assert!(!config.aws_region.is_empty());
-        
+
         // If CONFIG loaded successfully from env, it might have credentials
         // If it failed to load from env, it should return defaults with no credentials
         match CONFIG.as_ref() {
