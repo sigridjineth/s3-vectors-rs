@@ -199,7 +199,7 @@ impl VectorCommand {
             pb.set_style(
                 ProgressStyle::default_bar()
                     .template("{spinner:.green} [{elapsed_precise}] [{bar:40.cyan/blue}] {pos}/{len} ({eta})")
-                    .unwrap()
+                    .context("Failed to set progress bar template")?
                     .progress_chars("#>-")
             );
             

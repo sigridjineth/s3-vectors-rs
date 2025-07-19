@@ -1,5 +1,7 @@
 pub mod bucket;
 pub mod index;
+pub mod init;
+pub mod install_models;
 pub mod interactive;
 pub mod output;
 pub mod policy;
@@ -67,6 +69,12 @@ pub struct Cli {
 
 #[derive(Subcommand, Debug)]
 pub enum Commands {
+    #[command(about = "Initialize AWS credentials")]
+    Init(init::InitCommand),
+    
+    #[command(about = "Download ML models for RAG functionality")]
+    InstallModels(install_models::InstallModelsCommand),
+    
     #[command(about = "Manage vector buckets")]
     Bucket(bucket::BucketCommand),
     

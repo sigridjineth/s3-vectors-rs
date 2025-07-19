@@ -2,6 +2,7 @@ use crate::cli::OutputFormat;
 use anyhow::Result;
 use serde::Serialize;
 use tabled::{Table, Tabled};
+use tracing;
 
 pub trait OutputFormatter {
     fn format_output<T: Serialize>(&self, data: T, format: OutputFormat) -> Result<String>;
@@ -22,6 +23,7 @@ impl OutputFormatter for DefaultFormatter {
             OutputFormat::Table => {
                 // For table output, we'll need specific implementations
                 // This is a fallback to JSON
+                tracing::debug!("Table format requested but not implemented for this data type, falling back to JSON");
                 serde_json::to_string_pretty(&data).map_err(Into::into)
             }
         }

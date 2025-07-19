@@ -15,7 +15,7 @@ const ASCII_BANNER: &str = r#"
 ║    ███████║██████╔╝    ╚████╔╝ ███████╗╚██████╗   ██║   ╚██████╔╝██║  ██║     ║
 ║    ╚══════╝╚═════╝      ╚═══╝  ╚══════╝ ╚═════╝   ╚═╝    ╚═════╝ ╚═╝  ╚═╝     ║
 ║                                                                               ║
-║                AWS S3 Vectors CLI - by @sigridjineth                          ║
+║                    AWS S3 Vectors CLI by @sigridjineth                        ║
 ║                                                                               ║
 ╚═══════════════════════════════════════════════════════════════════════════════╝
 "#;
@@ -35,7 +35,7 @@ impl InteractiveMode {
         }
     }
 
-    pub async fn run(&self) -> Result<()> {
+    pub async fn run(mut self) -> Result<()> {
         self.display_banner();
         self.display_tips();
 
@@ -61,6 +61,23 @@ impl InteractiveMode {
                     self.clear_screen();
                     continue;
                 }
+                "init" => {
+                    // Handle init command specially
+                    let init_cmd = crate::cli::init::InitCommand;
+                    match init_cmd.execute_interactive().await {
+                        Ok(Some(new_client)) => {
+                            self.client = new_client;
+                            println!("\n{} Credentials configured successfully! You can now use S3 Vectors commands.\n", "✓".green());
+                        }
+                        Ok(None) => {
+                            println!("\n{} Init cancelled or skipped.\n", "ℹ".yellow());
+                        }
+                        Err(e) => {
+                            eprintln!("{} Failed to initialize: {}", "Error:".red(), e);
+                        }
+                    }
+                    continue;
+                }
                 _ => {}
             }
 
@@ -79,7 +96,7 @@ impl InteractiveMode {
     }
 
     fn display_tips(&self) {
-        println!("{}", "  Welcome to S3 Vectors interactive mode!".green());
+        println!("{}", "  Welcome to the unofficial S3 Vectors interactive CLI mode!".green());
         println!();
         println!("{}", "  Quick Start:".yellow().bold());
         println!("  ╭─────────────────────────────────────────────────────────────────────╮");
@@ -115,6 +132,8 @@ impl InteractiveMode {
         println!("{}", "║                            SPECIAL COMMANDS                                  ║".blue());
         println!("{}", "╠══════════════════════════════════════════════════════════════════════════════╣".blue());
         println!("{}", "║                                                                              ║".blue());
+        println!("{} {:<20} {:<57} {}", "║".blue(), "init".yellow(), "- Configure AWS credentials",    "║".blue());
+        println!("{} {:<20} {:<57} {}", "║".blue(), "install-models".yellow(), "- Download ML models for RAG",    "║".blue());
         println!("{} {:<20} {:<57} {}", "║".blue(), "help, /help, ?".yellow(), "- Show this help",    "║".blue());
         println!("{} {:<20} {:<57} {}", "║".blue(), "clear, /clear".yellow(), "- Clear the screen",   "║".blue());
         println!("{} {:<20} {:<57} {}", "║".blue(), "exit, quit".yellow(), "- Exit interactive mode", "║".blue());
@@ -143,6 +162,12 @@ impl InteractiveMode {
             Ok(parsed) => {
                 // Execute the command
                 match parsed.command {
+                    Commands::Init(cmd) => {
+                        cmd.execute().await?;
+                    },
+                    Commands::InstallModels(cmd) => {
+                        cmd.execute().await?;
+                    },
                     Commands::Bucket(cmd) => cmd.execute(&self.client, self.output_format).await?,
                     Commands::Index(cmd) => cmd.execute(&self.client, self.output_format).await?,
                     Commands::Vector(cmd) => cmd.execute(&self.client, self.output_format).await?,

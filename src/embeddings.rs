@@ -26,7 +26,11 @@ fn get_bert_model() -> Result<Rc<BertModelWrapper>> {
                 .context("Failed to load BERT model for embeddings");
             *model_ref = Some(result);
         }
-        model_ref.as_ref().unwrap().as_ref().map(|m| m.clone()).map_err(|e| anyhow::anyhow!("{}", e))
+        model_ref.as_ref()
+            .ok_or_else(|| anyhow::anyhow!("Model not initialized"))?
+            .as_ref()
+            .map(|m| m.clone())
+            .map_err(|e| anyhow::anyhow!("Model error: {}", e))
     })
 }
 

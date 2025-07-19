@@ -234,6 +234,16 @@ impl Vector {
             );
         }
         
+        // Validate that vector values are not NaN or Infinity
+        for (i, &value) in self.data.float32.iter().enumerate() {
+            if value.is_nan() {
+                anyhow::bail!("Vector contains NaN at index {}", i);
+            }
+            if value.is_infinite() {
+                anyhow::bail!("Vector contains infinite value at index {}", i);
+            }
+        }
+        
         if let Some(ref metadata) = self.metadata {
             let size = serde_json::to_vec(metadata)?.len();
             if size > 40960 {

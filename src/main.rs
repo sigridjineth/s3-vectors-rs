@@ -19,28 +19,28 @@ async fn main() -> Result<()> {
         .with(tracing_subscriber::fmt::layer())
         .init();
     
-    // Create S3 Vectors client
-    let client = if let Some(_profile) = &cli.profile {
-        // TODO: Implement AWS profile support
-        tracing::warn!("AWS profile support not yet implemented, using environment credentials");
-        S3VectorsClient::from_env()
-            .unwrap_or_else(|_| S3VectorsClient::new(&cli.region))
-    } else {
-        S3VectorsClient::from_env()
-            .unwrap_or_else(|_| S3VectorsClient::new(&cli.region))
+    // Create S3 Vectors client with proper precedence: profile > env > default
+    let client = match (&cli.profile, S3VectorsClient::from_env_with_region(Some(&cli.region))) {
+        (Some(profile), _) => {
+            tracing::info!("Using AWS profile: {}", profile);
+            S3VectorsClient::from_profile(profile, &cli.region)
+                .unwrap_or_else(|e| {
+                    tracing::warn!("Failed to load profile '{}': {}. Using default client.", profile, e);
+                    S3VectorsClient::new(&cli.region)
+                })
+        },
+        (None, Ok(client)) => client,
+        (None, Err(_)) => {
+            tracing::debug!("No credentials found in environment, using anonymous client");
+            S3VectorsClient::new(&cli.region)
+        },
     };
     
-    // Verify region matches
-    if client.region() != cli.region && std::env::var("AWS_REGION").is_err() {
-        tracing::warn!(
-            "Client region '{}' doesn't match CLI region '{}'. Using client region.",
-            client.region(),
-            cli.region
-        );
-    }
     
     // Execute the appropriate command or enter interactive mode
     match &cli.command {
+        Some(Commands::Init(cmd)) => cmd.execute().await?,
+        Some(Commands::InstallModels(cmd)) => cmd.execute().await?,
         Some(Commands::Bucket(cmd)) => cmd.execute(&client, cli.output).await?,
         Some(Commands::Index(cmd)) => cmd.execute(&client, cli.output).await?,
         Some(Commands::Vector(cmd)) => cmd.execute(&client, cli.output).await?,
