@@ -18,11 +18,11 @@ struct Cli {
     region: String,
     
     /// S3 Vectors bucket name
-    #[arg(short, long, default_value = "rag-demo-sigrid")]
+    #[arg(short, long, default_value = "rag-demo-default")]
     bucket: String,
     
     /// S3 Vectors index name
-    #[arg(short, long, default_value = "documents-sigrid")]
+    #[arg(short, long, default_value = "documents-default")]
     index: String,
 }
 

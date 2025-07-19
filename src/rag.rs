@@ -27,8 +27,8 @@ pub struct RagConfig {
 impl Default for RagConfig {
     fn default() -> Self {
         Self {
-            bucket_name: "rag-vectors-sigrid".to_string(),
-            index_name: "documents-sigrid".to_string(),
+            bucket_name: "rag-vectors-default".to_string(),
+            index_name: "documents-default".to_string(),
             embedding_batch_size: 32,
             vector_upload_batch_size: 100,
             max_concurrent_embeddings: 4,
@@ -331,8 +331,8 @@ mod tests {
     #[tokio::test]
     async fn test_rag_config() {
         let config = RagConfig::default();
-        assert_eq!(config.bucket_name, "rag-vectors");
-        assert_eq!(config.index_name, "documents");
+        assert_eq!(config.bucket_name, "rag-vectors-default");
+        assert_eq!(config.index_name, "documents-default");
         assert_eq!(config.embedding_batch_size, 32);
     }
 }

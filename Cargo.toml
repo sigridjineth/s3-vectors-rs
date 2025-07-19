@@ -2,6 +2,15 @@
 name = "s3-vectors"
 version = "0.1.0"
 edition = "2021"
+authors = ["Sigrid Jin <sigrid.jinhyung@gmail.com>"]
+description = "AWS S3 Vectors CLI (Unofficial)"
+repository = "https://github.com/sigridjineth/s3-vectors-rust"
+homepage = "https://github.com/sigridjineth/s3-vectors-rust"
+documentation = "https://github.com/sigridjineth/s3-vectors-rust"
+readme = "README.md"
+keywords = ["aws", "s3", "vectors", "embeddings", "similarity-search"]
+categories = ["command-line-utilities", "web-programming"]
+license = "MIT OR Apache-2.0"
 
 [dependencies]
 # Core dependencies
@@ -16,9 +25,11 @@ reqwest = { version = "0.12.15", default-features = false, features = [
     "http2",
     "rustls-tls",
     "json",
+    "stream",
 ] }
 serde = { version = "1.0.219", features = ["derive"] }
 serde_json = "1.0.140"
+serde_yaml = "0.9"
 sha2 = "0.10"
 thiserror = "2.0"
 tokio = { version = "1.45.0", features = ["macros", "net", "rt-multi-thread", "time", "fs"] }
@@ -40,6 +51,15 @@ regex = "1.11.1"
 crossbeam-channel = "0.5"
 lazy_static = "1.5"
 
+# CLI dependencies
+clap = { version = "4.5", features = ["derive", "env"] }
+tabled = "0.16"
+indicatif = "0.17"
+dialoguer = "0.11"
+colored = "2.1"
+dirs = "5.0"
+futures-util = "0.3"
+
 [dev-dependencies]
 tempfile = "3.14.0"
 
@@ -47,11 +67,15 @@ tempfile = "3.14.0"
 name = "rag_demo"
 required-features = []
 
-[dependencies.clap]
-version = "4.5"
-features = ["derive"]
-optional = true
+# Release profile optimizations for smaller binaries
+[profile.release]
+opt-level = "z"          # Optimize for size
+lto = true               # Enable Link Time Optimization
+codegen-units = 1        # Single codegen unit for better optimization
+strip = true             # Strip symbols
+panic = "abort"          # Smaller panic handler
 
-[features]
-default = ["examples"]
-examples = ["dep:clap"]
+# Binary configuration for cargo install
+[[bin]]
+name = "s3-vectors"
+path = "src/main.rs"

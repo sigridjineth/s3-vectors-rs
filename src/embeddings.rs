@@ -1,4 +1,5 @@
 use std::rc::Rc;
+use std::cell::RefCell;
 use anyhow::{Context, Result};
 use candle_core::{Device, Tensor};
 use candle_nn::VarBuilder;
@@ -12,13 +13,25 @@ const MODEL_ID: &str = "sentence-transformers/all-MiniLM-L6-v2";
 const MODEL_REV: &str = "main";
 
 thread_local! {
-    static BERT_MODEL: Rc<BertModelWrapper> = {
-        info!("Loading BERT model on thread: {:?}", std::thread::current().id());
-        match BertModelWrapper::new(Device::Cpu) {
-            Ok(model) => Rc::new(model),
-            Err(e) => panic!("Failed to load BERT model: {}", e),
+    static BERT_MODEL: RefCell<Option<Result<Rc<BertModelWrapper>>>> = RefCell::new(None);
+}
+
+fn get_bert_model() -> Result<Rc<BertModelWrapper>> {
+    BERT_MODEL.with(|model_cell| {
+        let mut model_ref = model_cell.borrow_mut();
+        if model_ref.is_none() {
+            info!("Loading BERT model on thread: {:?}", std::thread::current().id());
+            let result = BertModelWrapper::new(Device::Cpu)
+                .map(|m| Rc::new(m))
+                .context("Failed to load BERT model for embeddings");
+            *model_ref = Some(result);
         }
-    };
+        model_ref.as_ref()
+            .ok_or_else(|| anyhow::anyhow!("Model not initialized"))?
+            .as_ref()
+            .map(|m| m.clone())
+            .map_err(|e| anyhow::anyhow!("Model error: {}", e))
+    })
 }
 
 pub struct BertModelWrapper {
@@ -261,7 +274,7 @@ impl BertModelWrapper {
 
 /// Get the thread-local instance of the BERT model
 pub fn get_model() -> Result<Rc<BertModelWrapper>> {
-    BERT_MODEL.with(|model| Ok(model.clone()))
+    get_bert_model()
 }
 
 /// Embed a single text
@@ -324,6 +337,18 @@ mod tests {
         assert_eq!(embeddings.len(), 3);
         for embedding in &embeddings {
             assert_eq!(embedding.len(), 384);
+        }
+    }
+    
+    #[test]
+    fn test_model_loading_returns_result() {
+        // Test that get_model returns a Result type
+        let result = get_model();
+        // This will either succeed (if model files exist) or return an error
+        // The important thing is it doesn't panic
+        match result {
+            Ok(_) => println!("Model loaded successfully"),
+            Err(e) => println!("Model loading failed as expected: {}", e),
         }
     }
 }

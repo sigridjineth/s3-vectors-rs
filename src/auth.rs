@@ -122,18 +122,19 @@ impl AwsV4Signer {
 
     fn calculate_signature(&self, date_stamp: &str, string_to_sign: &str) -> Result<String> {
         let k_secret = format!("AWS4{}", self.secret_access_key);
-        let k_date = sign(k_secret.as_bytes(), date_stamp.as_bytes());
-        let k_region = sign(&k_date, self.region.as_bytes());
-        let k_service = sign(&k_region, b"s3vectors");
-        let k_signing = sign(&k_service, b"aws4_request");
-        let signature = sign(&k_signing, string_to_sign.as_bytes());
+        let k_date = sign(k_secret.as_bytes(), date_stamp.as_bytes())?;
+        let k_region = sign(&k_date, self.region.as_bytes())?;
+        let k_service = sign(&k_region, b"s3vectors")?;
+        let k_signing = sign(&k_service, b"aws4_request")?;
+        let signature = sign(&k_signing, string_to_sign.as_bytes())?;
         
         Ok(hex::encode(signature))
     }
 }
 
-fn sign(key: &[u8], msg: &[u8]) -> Vec<u8> {
-    let mut mac = HmacSha256::new_from_slice(key).expect("HMAC can take key of any size");
+fn sign(key: &[u8], msg: &[u8]) -> Result<Vec<u8>> {
+    let mut mac = HmacSha256::new_from_slice(key)
+        .map_err(|e| anyhow::anyhow!("Failed to create HMAC: {}", e))?;
     mac.update(msg);
-    mac.finalize().into_bytes().to_vec()
+    Ok(mac.finalize().into_bytes().to_vec())
 }
