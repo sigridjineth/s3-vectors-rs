@@ -19,6 +19,7 @@ reqwest = { version = "0.12.15", default-features = false, features = [
 ] }
 serde = { version = "1.0.219", features = ["derive"] }
 serde_json = "1.0.140"
+serde_yaml = "0.9"
 sha2 = "0.10"
 thiserror = "2.0"
 tokio = { version = "1.45.0", features = ["macros", "net", "rt-multi-thread", "time", "fs"] }
@@ -40,18 +41,15 @@ regex = "1.11.1"
 crossbeam-channel = "0.5"
 lazy_static = "1.5"
 
+# CLI dependencies
+clap = { version = "4.5", features = ["derive", "env"] }
+tabled = "0.16"
+indicatif = "0.17"
+dialoguer = "0.11"
+
 [dev-dependencies]
 tempfile = "3.14.0"
 
 [[example]]
 name = "rag_demo"
 required-features = []
-
-[dependencies.clap]
-version = "4.5"
-features = ["derive"]
-optional = true
-
-[features]
-default = ["examples"]
-examples = ["dep:clap"]

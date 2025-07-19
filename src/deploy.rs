@@ -433,6 +433,70 @@ impl S3VectorsClient {
             Some(request),
         ).await
     }
+    
+    pub async fn put_vector_bucket_policy(&self, bucket_name: &str, policy: &str) -> Result<(), S3VectorsError> {
+        validate_bucket_name(bucket_name)
+            .map_err(|e| S3VectorsError::Validation(e.to_string()))?;
+        
+        // Validate JSON policy
+        let _: serde_json::Value = serde_json::from_str(policy)
+            .map_err(|e| S3VectorsError::Validation(format!("Invalid JSON policy: {}", e)))?;
+        
+        info!("Putting policy for bucket {}", bucket_name);
+        
+        let request = serde_json::json!({
+            "vectorBucketName": bucket_name,
+            "policy": policy
+        });
+        
+        self.execute_request::<serde_json::Value>(
+            "/PutVectorBucketPolicy",
+            Some(request),
+        ).await?;
+        
+        Ok(())
+    }
+    
+    pub async fn get_vector_bucket_policy(&self, bucket_name: &str) -> Result<String, S3VectorsError> {
+        validate_bucket_name(bucket_name)
+            .map_err(|e| S3VectorsError::Validation(e.to_string()))?;
+        
+        info!("Getting policy for bucket {}", bucket_name);
+        
+        let request = serde_json::json!({
+            "vectorBucketName": bucket_name
+        });
+        
+        #[derive(serde::Deserialize)]
+        struct PolicyResponse {
+            policy: String,
+        }
+        
+        let response: PolicyResponse = self.execute_request(
+            "/GetVectorBucketPolicy",
+            Some(request),
+        ).await?;
+        
+        Ok(response.policy)
+    }
+    
+    pub async fn delete_vector_bucket_policy(&self, bucket_name: &str) -> Result<(), S3VectorsError> {
+        validate_bucket_name(bucket_name)
+            .map_err(|e| S3VectorsError::Validation(e.to_string()))?;
+        
+        info!("Deleting policy for bucket {}", bucket_name);
+        
+        let request = serde_json::json!({
+            "vectorBucketName": bucket_name
+        });
+        
+        self.execute_request::<serde_json::Value>(
+            "/DeleteVectorBucketPolicy",
+            Some(request),
+        ).await?;
+        
+        Ok(())
+    }
 }
 
 // Helper functions

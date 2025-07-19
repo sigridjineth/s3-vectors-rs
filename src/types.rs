@@ -92,7 +92,7 @@ pub struct ListVectorBucketsRequest {
     pub next_token: Option<String>,
 }
 
-#[derive(Clone, Debug, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ListVectorBucketsResponse {
     pub buckets: Vec<VectorBucket>,
@@ -177,7 +177,7 @@ pub struct ListIndexesRequest {
     pub next_token: Option<String>,
 }
 
-#[derive(Clone, Debug, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ListIndexesResponse {
     pub indexes: Vec<VectorIndex>,
@@ -192,13 +192,13 @@ pub struct GetIndexRequest {
     pub index_name: String,
 }
 
-#[derive(Clone, Debug, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct GetIndexResponse {
     pub index: IndexInfo,
 }
 
-#[derive(Clone, Debug, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct IndexInfo {
     pub dimension: u32,
@@ -265,13 +265,13 @@ pub struct GetVectorsRequest {
     pub return_metadata: bool,
 }
 
-#[derive(Clone, Debug, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct GetVectorsResponse {
     pub vectors: Vec<RetrievedVector>,
 }
 
-#[derive(Clone, Debug, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct RetrievedVector {
     pub key: String,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -299,7 +299,7 @@ pub struct ListVectorsRequest {
     pub next_token: Option<String>,
 }
 
-#[derive(Clone, Debug, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ListVectorsResponse {
     pub keys: Vec<String>,
@@ -327,12 +327,12 @@ pub struct QueryVector {
     pub float32: Vec<f32>,
 }
 
-#[derive(Clone, Debug, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct QueryVectorsResponse {
     pub vectors: Vec<MatchedVector>,
 }
 
-#[derive(Clone, Debug, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct MatchedVector {
     pub key: String,
     #[serde(skip_serializing_if = "Option::is_none")]

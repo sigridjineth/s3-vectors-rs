@@ -4,3 +4,4 @@ target/
 test_documents/
 models/
 .DS_Store
+CLAUDE.md

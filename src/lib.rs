@@ -9,11 +9,14 @@ pub mod document;
 pub mod embeddings;
 pub mod rag;
 
+// CLI module
+pub mod cli;
+
 use std::sync::LazyLock;
 
 use anyhow::Result;
 
-pub use crate::config::CONFIG;
+pub use crate::config::{CONFIG, get_config};
 pub use crate::types::*;
 pub use crate::validation::*;
 
@@ -21,11 +24,18 @@ pub use crate::validation::*;
 pub use crate::deploy::{batch_put_vectors, create_bucket_and_index, S3VectorsError};
 
 static HTTP_CLIENT: LazyLock<reqwest::Client> = LazyLock::new(|| {
-    reqwest::Client::builder()
+    match reqwest::Client::builder()
         .user_agent(concat!(env!("CARGO_PKG_NAME"), "/", env!("CARGO_PKG_VERSION")))
         .timeout(std::time::Duration::from_secs(30))
         .build()
-        .expect("failed to build HTTP client")
+    {
+        Ok(client) => client,
+        Err(e) => {
+            // Log the error but provide a working default client
+            eprintln!("Warning: Failed to build custom HTTP client: {}. Using default client.", e);
+            reqwest::Client::new()
+        }
+    }
 });
 
 #[derive(Clone, Debug)]
@@ -71,18 +81,19 @@ impl S3VectorsClient {
     
     /// Create a client from environment variables
     pub fn from_env() -> Result<Self> {
-        let region = CONFIG.aws_region.clone();
+        let config = get_config();
+        let region = config.aws_region.clone();
         
-        let signer = if CONFIG.has_credentials() {
-            let access_key = CONFIG.aws_access_key_id.clone()
+        let signer = if config.has_credentials() {
+            let access_key = config.aws_access_key_id.clone()
                 .ok_or_else(|| anyhow::anyhow!("AWS_ACCESS_KEY_ID not set"))?;
-            let secret_key = CONFIG.aws_secret_access_key.clone()
+            let secret_key = config.aws_secret_access_key.clone()
                 .ok_or_else(|| anyhow::anyhow!("AWS_SECRET_ACCESS_KEY not set"))?;
             
             Some(auth::AwsV4Signer::new(
                 access_key,
                 secret_key,
-                CONFIG.aws_session_token.clone(),
+                config.aws_session_token.clone(),
                 region.clone(),
             ))
         } else {
@@ -94,5 +105,28 @@ impl S3VectorsClient {
             region,
             signer,
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_s3_vectors_client_creation() {
+        // Test that client can be created with region
+        let client = S3VectorsClient::new("us-east-1");
+        assert_eq!(client.region(), "us-east-1");
+        assert_eq!(client.endpoint, "https://s3vectors.us-east-1.api.aws");
+        assert!(client.signer.is_none());
+    }
+
+    #[test]
+    fn test_from_env_without_credentials() {
+        // Should not panic even without credentials
+        let result = S3VectorsClient::from_env();
+        assert!(result.is_ok());
+        let client = result.unwrap();
+        assert!(client.signer.is_none());
     }
 }
