@@ -50,7 +50,8 @@ impl InitCommand {
             .with_prompt("How would you like to configure credentials?")
             .items(&options)
             .default(0)
-            .interact()?;
+            .interact()
+            .context("Failed to get credential type selection")?;
             
         match selection {
             0 => self.setup_access_keys().await,
@@ -88,7 +89,8 @@ impl InitCommand {
                 
             let secret_access_key: String = Password::with_theme(&ColorfulTheme::default())
                 .with_prompt("AWS Secret Access Key")
-                .interact()?;
+                .interact()
+                .context("Failed to get secret access key input")?;
                 
             let session_token: Option<String> = {
                 let token: String = Input::with_theme(&ColorfulTheme::default())
@@ -148,7 +150,8 @@ impl InitCommand {
                 
                 if !Confirm::with_theme(&ColorfulTheme::default())
                     .with_prompt("Would you like to try again?")
-                    .interact()? 
+                    .interact()
+                    .context("Failed to get retry confirmation")? 
                 {
                     return Ok(None);
                 }
@@ -168,7 +171,8 @@ impl InitCommand {
             
             if Confirm::with_theme(&ColorfulTheme::default())
                 .with_prompt("Create new credentials?")
-                .interact()? 
+                .interact()
+                .context("Failed to get credential creation confirmation")? 
             {
                 return self.setup_access_keys().await;
             } else {
@@ -187,7 +191,8 @@ impl InitCommand {
         let selection = Select::with_theme(&ColorfulTheme::default())
             .with_prompt("Select a profile")
             .items(&profiles)
-            .interact()?;
+            .interact()
+            .context("Failed to get profile selection")?;
             
         let profile_name = &profiles[selection];
         let region = self.select_region().await?;
@@ -220,7 +225,8 @@ impl InitCommand {
             .with_prompt("Select AWS region")
             .items(&regions)
             .default(0)
-            .interact()?;
+            .interact()
+            .context("Failed to get region selection")?;
             
         if selection == regions.len() - 1 {
             Input::with_theme(&ColorfulTheme::default())
@@ -254,14 +260,16 @@ impl InitCommand {
             .with_prompt("Where to save credentials?")
             .items(&options)
             .default(0)
-            .interact()?;
+            .interact()
+            .context("Failed to get user selection")?;
             
         match selection {
             0 => {
                 let profile_name: String = Input::with_theme(&ColorfulTheme::default())
                     .with_prompt("Profile name")
                     .default("default".to_string())
-                    .interact_text()?;
+                    .interact_text()
+                    .context("Failed to get profile name input")?;
                 Ok(SaveOption::AwsCredentials(profile_name))
             },
             1 => Ok(SaveOption::Environment),

@@ -126,7 +126,8 @@ impl S3VectorsClient {
             return Err(anyhow::anyhow!("AWS credentials file not found at: {:?}", creds_path));
         }
         
-        let creds = parse_credentials_file(&creds_path, profile_name)?;
+        let creds = parse_credentials_file(&creds_path, profile_name)
+            .with_context(|| format!("Failed to parse credentials for profile: {}", profile_name))?;
         
         Ok(Self::with_credentials(
             region,
@@ -187,7 +188,7 @@ fn parse_credentials_file(path: &Path, profile_name: &str) -> Result<AwsCredenti
     let mut credentials = HashMap::new();
     
     for line in reader.lines() {
-        let line = line?;
+        let line = line.context("Failed to read line from credentials file")?;
         let line = line.trim();
         
         if line.is_empty() || line.starts_with('#') {
