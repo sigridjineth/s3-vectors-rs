@@ -238,10 +238,18 @@ mod tests {
 
     #[test]
     fn test_from_env_without_credentials() {
-        // Should not panic even without credentials
+        // Test that from_env succeeds regardless of whether credentials are present
         let result = S3VectorsClient::from_env();
         assert!(result.is_ok());
         let client = result.unwrap();
-        assert!(client.signer.is_none());
+        
+        // If no credentials in env, signer should be None
+        // If credentials are present, signer should be Some
+        let config = crate::config::get_config();
+        if config.has_credentials() {
+            assert!(client.signer.is_some());
+        } else {
+            assert!(client.signer.is_none());
+        }
     }
 }

@@ -233,8 +233,8 @@ pub fn extract_title(content: &str) -> Option<String> {
 }
 
 lazy_static! {
-    static ref WHITESPACE_REGEX: Regex = Regex::new(r"\s+").unwrap();
-    static ref SPECIAL_REGEX: Regex = Regex::new(r#"[^\w\s\.\,\!\?\-\'\"]"#).unwrap();
+    static ref WHITESPACE_REGEX: Regex = Regex::new(r"\s+").expect("Failed to compile whitespace regex");
+    static ref SPECIAL_REGEX: Regex = Regex::new(r#"[^\w\s\.\,\!\?\-\'\"]"#).expect("Failed to compile special characters regex");
 }
 
 /// Clean and normalize text content

@@ -91,6 +91,8 @@ pub struct ListVectorBucketsRequest {
     pub max_results: Option<u32>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub next_token: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub prefix: Option<String>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -180,8 +182,17 @@ pub struct ListIndexesRequest {
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+pub struct IndexSummary {
+    pub index_name: String,
+    pub index_arn: String,
+    pub vector_bucket_name: String,
+    pub creation_time: f64,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct ListIndexesResponse {
-    pub indexes: Vec<VectorIndex>,
+    pub indexes: Vec<IndexSummary>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub next_token: Option<String>,
 }

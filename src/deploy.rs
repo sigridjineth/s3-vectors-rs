@@ -47,6 +47,7 @@ pub enum S3VectorsError {
 }
 
 impl S3VectorsClient {
+    #[tracing::instrument(skip(self, body), fields(path))]
     async fn execute_request<T: DeserializeOwned>(
         &self,
         path: &str,
@@ -146,6 +147,7 @@ impl S3VectorsClient {
     }
     
     // Bucket operations
+    #[tracing::instrument(skip(self), fields(bucket_name))]
     pub async fn create_vector_bucket(&self, bucket_name: &str) -> Result<VectorBucket, S3VectorsError> {
         validate_bucket_name(bucket_name)
             .map_err(|e| S3VectorsError::Validation(e.to_string()))?;
@@ -164,6 +166,7 @@ impl S3VectorsClient {
         self.describe_vector_bucket(bucket_name).await
     }
     
+    #[tracing::instrument(skip(self), fields(bucket_name))]
     pub async fn delete_vector_bucket(&self, bucket_name: &str) -> Result<(), S3VectorsError> {
         validate_bucket_name(bucket_name)
             .map_err(|e| S3VectorsError::Validation(e.to_string()))?;
@@ -181,14 +184,17 @@ impl S3VectorsClient {
         Ok(())
     }
     
+    #[tracing::instrument(skip(self))]
     pub async fn list_vector_buckets(
         &self,
         max_results: Option<u32>,
         next_token: Option<String>,
+        prefix: Option<String>,
     ) -> Result<ListVectorBucketsResponse, S3VectorsError> {
         let request = ListVectorBucketsRequest {
             max_results,
             next_token,
+            prefix,
         };
         
         info!("Listing vector buckets");
@@ -198,6 +204,7 @@ impl S3VectorsClient {
         ).await
     }
     
+    #[tracing::instrument(skip(self), fields(bucket_name))]
     pub async fn describe_vector_bucket(&self, bucket_name: &str) -> Result<VectorBucket, S3VectorsError> {
         validate_bucket_name(bucket_name)
             .map_err(|e| S3VectorsError::Validation(e.to_string()))?;
@@ -225,6 +232,7 @@ impl S3VectorsClient {
     }
     
     // Index operations
+    #[tracing::instrument(skip(self, request), fields(bucket = %request.vector_bucket_name, index = %request.index_name))]
     pub async fn create_index(&self, request: CreateIndexRequest) -> Result<(), S3VectorsError> {
         validate_bucket_name(&request.vector_bucket_name)
             .map_err(|e| S3VectorsError::Validation(e.to_string()))?;
@@ -242,6 +250,7 @@ impl S3VectorsClient {
         Ok(())
     }
     
+    #[tracing::instrument(skip(self), fields(bucket_name, index_name))]
     pub async fn delete_index(&self, bucket_name: &str, index_name: &str) -> Result<(), S3VectorsError> {
         validate_bucket_name(bucket_name)
             .map_err(|e| S3VectorsError::Validation(e.to_string()))?;
@@ -261,6 +270,7 @@ impl S3VectorsClient {
         Ok(())
     }
     
+    #[tracing::instrument(skip(self), fields(bucket_name))]
     pub async fn list_indexes(
         &self,
         bucket_name: &str,
@@ -283,6 +293,7 @@ impl S3VectorsClient {
         ).await
     }
     
+    #[tracing::instrument(skip(self), fields(bucket_name, index_name))]
     pub async fn describe_index(&self, bucket_name: &str, index_name: &str) -> Result<VectorIndex, S3VectorsError> {
         validate_bucket_name(bucket_name)
             .map_err(|e| S3VectorsError::Validation(e.to_string()))?;
@@ -313,6 +324,7 @@ impl S3VectorsClient {
     }
     
     // Vector operations
+    #[tracing::instrument(skip(self, request), fields(bucket = %request.vector_bucket_name, index = %request.index_name, count = request.vectors.len()))]
     pub async fn put_vectors(&self, request: PutVectorsRequest) -> Result<(), S3VectorsError> {
         validate_bucket_name(&request.vector_bucket_name)
             .map_err(|e| S3VectorsError::Validation(e.to_string()))?;

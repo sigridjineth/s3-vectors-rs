@@ -108,8 +108,11 @@ impl RagPipeline {
         let upload_handle = tokio::spawn(async move {
             let mut buffer = Vec::new();
             let mut total_uploaded = 0;
+            let mut total_chunks = 0;
+            let mut first_error = None;
             
             while let Ok((chunk, embedding)) = receiver.recv() {
+                total_chunks += 1;
                 let vector = Vector {
                     key: chunk.id.clone(),
                     data: VectorData {
@@ -128,6 +131,9 @@ impl RagPipeline {
                         }
                         Err(e) => {
                             tracing::error!("Error uploading vectors: {}", e);
+                            if first_error.is_none() {
+                                first_error = Some(e.to_string());
+                            }
                         }
                     }
                     buffer.clear();
@@ -143,11 +149,25 @@ impl RagPipeline {
                     }
                     Err(e) => {
                         tracing::error!("Error uploading final batch: {}", e);
+                        if first_error.is_none() {
+                            first_error = Some(e.to_string());
+                        }
                     }
                 }
             }
             
-            info!("Total vectors uploaded: {}", total_uploaded);
+            info!("Total vectors uploaded: {} out of {}", total_uploaded, total_chunks);
+            
+            if let Some(error) = first_error {
+                if total_uploaded == 0 {
+                    Err(anyhow::anyhow!("Failed to upload any vectors: {}", error))
+                } else {
+                    Err(anyhow::anyhow!("Partial upload: {} of {} vectors uploaded. First error: {}", 
+                        total_uploaded, total_chunks, error))
+                }
+            } else {
+                Ok(total_uploaded)
+            }
         });
         
         // Process documents and generate embeddings in parallel
@@ -168,12 +188,21 @@ impl RagPipeline {
         drop(sender);
         
         // Wait for upload to complete
-        upload_handle.await?;
+        let upload_result = upload_handle.await
+            .context("Upload task panicked")?;
         
         let elapsed = start_time.elapsed();
-        info!("Document ingestion completed in {:?}", elapsed);
         
-        Ok(())
+        match upload_result {
+            Ok(count) => {
+                info!("Document ingestion completed in {:?}. Uploaded {} vectors.", elapsed, count);
+                Ok(())
+            },
+            Err(e) => {
+                tracing::error!("Document ingestion failed: {}", e);
+                Err(e)
+            }
+        }
     }
     
     /// Process a single document

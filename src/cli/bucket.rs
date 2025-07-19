@@ -9,6 +9,9 @@ use tabled::Tabled;
 use chrono::{DateTime, Utc, NaiveDate};
 use std::str::FromStr;
 
+// API limits
+const MAX_LIST_RESULTS: u32 = 500;  // AWS S3 Vectors API maximum
+
 #[derive(Args, Debug)]
 pub struct BucketCommand {
     #[command(subcommand)]
@@ -40,7 +43,7 @@ pub enum BucketSubcommands {
     
     #[command(about = "Query vector buckets with advanced filtering")]
     Query {
-        #[arg(help = "Simple name pattern to search for")]
+        #[arg(help = "Bucket name prefix to search for (e.g., 'prod' matches 'prod-vectors')")]
         pattern: Option<String>,
         
         #[arg(long, help = "Filter buckets containing this text in the name")]
@@ -167,10 +170,10 @@ impl BucketCommand {
         &self,
         client: &S3VectorsClient,
         max_results: u32,
-        _prefix: Option<&str>,
+        prefix: Option<&str>,
         output_format: OutputFormat,
     ) -> Result<()> {
-        let response = client.list_vector_buckets(Some(max_results), None).await?;
+        let response = client.list_vector_buckets(Some(max_results), None, prefix.map(|s| s.to_string())).await?;
         
         match output_format {
             OutputFormat::Table => {
@@ -277,13 +280,45 @@ impl BucketCommand {
         limit: Option<usize>,
         output_format: OutputFormat,
     ) -> Result<()> {
+        // Determine if we can use API-level prefix filtering
+        let api_prefix = if pattern.is_some() && name_contains.is_none() && name_prefix.is_none() && name_suffix.is_none() {
+            // Simple pattern search - use as prefix by default
+            pattern
+        } else if name_prefix.is_some() && pattern.is_none() && name_contains.is_none() && name_suffix.is_none() {
+            // Only prefix filter specified
+            name_prefix
+        } else {
+            None
+        };
+        
         // Fetch all buckets with pagination
         let mut all_buckets = Vec::new();
         let mut next_token = None;
+        let mut page_count = 0;
+        
+        // Show progress if fetching many buckets
+        if api_prefix.is_none() && output_format == OutputFormat::Table {
+            print!("Fetching buckets");
+            use std::io::{self, Write};
+            let _ = io::stdout().flush(); // Best effort flush, ignore errors
+        }
         
         loop {
-            let response = client.list_vector_buckets(Some(1000), next_token).await?;
+            let response = client.list_vector_buckets(
+                Some(MAX_LIST_RESULTS), 
+                next_token.clone(),
+                api_prefix.map(|s| s.to_string())
+            ).await?;
+            
             all_buckets.extend(response.buckets);
+            page_count += 1;
+            
+            // Show progress for large lists
+            if page_count > 1 && output_format == OutputFormat::Table {
+                print!(".");
+                use std::io::{self, Write};
+                let _ = io::stdout().flush(); // Best effort flush, ignore errors
+            }
             
             match response.next_token {
                 Some(token) => next_token = Some(token),
@@ -291,18 +326,26 @@ impl BucketCommand {
             }
         }
         
-        // Apply filters
+        // Complete the progress line
+        if api_prefix.is_none() && page_count > 1 && output_format == OutputFormat::Table {
+            println!(" done! ({} buckets)", all_buckets.len());
+        }
+        
+        // Apply client-side filters
         let mut filtered_buckets = all_buckets;
         
-        // Name filtering
-        if let Some(p) = pattern {
-            filtered_buckets.retain(|b| b.vector_bucket_name.contains(p));
-        }
-        if let Some(contains) = name_contains {
-            filtered_buckets.retain(|b| b.vector_bucket_name.contains(contains));
-        }
-        if let Some(prefix) = name_prefix {
-            filtered_buckets.retain(|b| b.vector_bucket_name.starts_with(prefix));
+        // Name filtering (if not already done server-side)
+        if api_prefix.is_none() {
+            if let Some(p) = pattern {
+                // Pattern uses prefix matching by default (more intuitive for bucket names)
+                filtered_buckets.retain(|b| b.vector_bucket_name.starts_with(p));
+            }
+            if let Some(contains) = name_contains {
+                filtered_buckets.retain(|b| b.vector_bucket_name.contains(contains));
+            }
+            if let Some(prefix) = name_prefix {
+                filtered_buckets.retain(|b| b.vector_bucket_name.starts_with(prefix));
+            }
         }
         if let Some(suffix) = name_suffix {
             filtered_buckets.retain(|b| b.vector_bucket_name.ends_with(suffix));
@@ -315,21 +358,31 @@ impl BucketCommand {
         
         // Date filtering
         if let Some(after_str) = created_after {
-            if let Ok(after_date) = parse_date(after_str) {
-                filtered_buckets.retain(|b| {
-                    DateTime::from_timestamp(b.creation_time as i64, 0)
-                        .map(|dt| dt >= after_date)
-                        .unwrap_or(false)
-                });
+            match parse_date(after_str) {
+                Ok(after_date) => {
+                    filtered_buckets.retain(|b| {
+                        DateTime::from_timestamp(b.creation_time as i64, 0)
+                            .map(|dt| dt >= after_date)
+                            .unwrap_or(false)
+                    });
+                }
+                Err(e) => {
+                    eprintln!("Warning: Invalid date format for --created-after '{}': {}. Supported formats: YYYY-MM-DD, 'today', 'yesterday', 'N days ago'", after_str, e);
+                }
             }
         }
         if let Some(before_str) = created_before {
-            if let Ok(before_date) = parse_date(before_str) {
-                filtered_buckets.retain(|b| {
-                    DateTime::from_timestamp(b.creation_time as i64, 0)
-                        .map(|dt| dt <= before_date)
-                        .unwrap_or(false)
-                });
+            match parse_date(before_str) {
+                Ok(before_date) => {
+                    filtered_buckets.retain(|b| {
+                        DateTime::from_timestamp(b.creation_time as i64, 0)
+                            .map(|dt| dt <= before_date)
+                            .unwrap_or(false)
+                    });
+                }
+                Err(e) => {
+                    eprintln!("Warning: Invalid date format for --created-before '{}': {}. Supported formats: YYYY-MM-DD, 'today', 'yesterday', 'N days ago'", before_str, e);
+                }
             }
         }
         
@@ -348,8 +401,8 @@ impl BucketCommand {
             }
             BucketSortField::Created => {
                 filtered_buckets.sort_by(|a, b| match sort_order {
-                    SortOrder::Asc => a.creation_time.partial_cmp(&b.creation_time).unwrap(),
-                    SortOrder::Desc => b.creation_time.partial_cmp(&a.creation_time).unwrap(),
+                    SortOrder::Asc => a.creation_time.partial_cmp(&b.creation_time).unwrap_or(std::cmp::Ordering::Equal),
+                    SortOrder::Desc => b.creation_time.partial_cmp(&a.creation_time).unwrap_or(std::cmp::Ordering::Equal),
                 });
             }
         }
@@ -401,14 +454,20 @@ impl BucketCommand {
 fn parse_date(date_str: &str) -> Result<DateTime<Utc>> {
     // Try parsing as ISO date first
     if let Ok(date) = NaiveDate::from_str(date_str) {
-        return Ok(date.and_hms_opt(0, 0, 0).unwrap().and_utc());
+        return date.and_hms_opt(0, 0, 0)
+            .map(|dt| Ok(dt.and_utc()))
+            .unwrap_or_else(|| Err(anyhow::anyhow!("Invalid date: {}", date_str)));
     }
     
     // Handle relative dates
     let now = Utc::now();
     match date_str.to_lowercase().as_str() {
-        "today" => Ok(now.date_naive().and_hms_opt(0, 0, 0).unwrap().and_utc()),
-        "yesterday" => Ok((now - chrono::Duration::days(1)).date_naive().and_hms_opt(0, 0, 0).unwrap().and_utc()),
+        "today" => now.date_naive().and_hms_opt(0, 0, 0)
+            .map(|dt| Ok(dt.and_utc()))
+            .unwrap_or_else(|| Err(anyhow::anyhow!("Invalid time calculation for today"))),
+        "yesterday" => (now - chrono::Duration::days(1)).date_naive().and_hms_opt(0, 0, 0)
+            .map(|dt| Ok(dt.and_utc()))
+            .unwrap_or_else(|| Err(anyhow::anyhow!("Invalid time calculation for yesterday"))),
         "last week" | "lastweek" => Ok(now - chrono::Duration::weeks(1)),
         "last month" | "lastmonth" => Ok(now - chrono::Duration::days(30)),
         s if s.ends_with(" days ago") => {
@@ -539,5 +598,91 @@ mod tests {
             }
             _ => panic!("Expected Delete command"),
         }
+    }
+
+    #[test]
+    fn test_parse_query_simple() {
+        let args = vec!["test", "query", "prod"];
+        let cli = TestCli::parse_from(args);
+        
+        match cli.command {
+            BucketSubcommands::Query { pattern, .. } => {
+                assert_eq!(pattern, Some("prod".to_string()));
+            }
+            _ => panic!("Expected Query command"),
+        }
+    }
+
+    #[test]
+    fn test_parse_query_with_filters() {
+        let args = vec!["test", "query", "--name-contains", "vec", "--status", "active"];
+        let cli = TestCli::parse_from(args);
+        
+        match cli.command {
+            BucketSubcommands::Query { 
+                pattern, name_contains, status, ..
+            } => {
+                assert_eq!(pattern, None);
+                assert_eq!(name_contains, Some("vec".to_string()));
+                assert_eq!(status, Some(BucketStatus::Active));
+            }
+            _ => panic!("Expected Query command"),
+        }
+    }
+
+    #[test]
+    fn test_parse_query_with_date_filter() {
+        let args = vec!["test", "query", "--created-after", "2024-01-01", "--sort-by", "created"];
+        let cli = TestCli::parse_from(args);
+        
+        match cli.command {
+            BucketSubcommands::Query { 
+                created_after, sort_by, ..
+            } => {
+                assert_eq!(created_after, Some("2024-01-01".to_string()));
+                assert!(matches!(sort_by, BucketSortField::Created));
+            }
+            _ => panic!("Expected Query command"),
+        }
+    }
+
+    #[test]
+    fn test_parse_date() {
+        // Test ISO date
+        let date = parse_date("2024-01-15").expect("Test date should parse");
+        assert_eq!(date.format("%Y-%m-%d").to_string(), "2024-01-15");
+
+        // Test relative dates
+        let today = parse_date("today").expect("Today should parse");
+        assert_eq!(today.date_naive(), Utc::now().date_naive());
+
+        // Test "days ago" format
+        let five_days = parse_date("5 days ago").expect("Relative date should parse");
+        let expected = Utc::now() - chrono::Duration::days(5);
+        assert_eq!(five_days.date_naive(), expected.date_naive());
+    }
+
+    #[test]
+    fn test_format_status() {
+        assert!(format_status(&Some(BucketStatus::Active)).contains("Active"));
+        assert!(format_status(&Some(BucketStatus::Creating)).contains("Creating"));
+        assert!(format_status(&Some(BucketStatus::Failed)).contains("Failed"));
+        assert!(format_status(&None).contains("Unknown"));
+    }
+
+    #[test]
+    fn test_format_relative_time() {
+        let now_timestamp = Utc::now().timestamp() as f64;
+        assert!(format_relative_time(now_timestamp).contains("minutes ago"));
+
+        let yesterday = (Utc::now() - chrono::Duration::days(1)).timestamp() as f64;
+        assert_eq!(format_relative_time(yesterday), "yesterday");
+
+        let five_days_ago = (Utc::now() - chrono::Duration::days(5)).timestamp() as f64;
+        assert!(format_relative_time(five_days_ago).contains("days ago"));
+        
+        let month_ago = (Utc::now() - chrono::Duration::days(30)).timestamp() as f64;
+        // Should show actual date for older timestamps
+        assert!(format_relative_time(month_ago).contains("-"));
     }
 }

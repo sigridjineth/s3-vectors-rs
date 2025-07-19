@@ -1,8 +1,11 @@
 # AWS S3 Vectors Rust CLI
+Unofficial CLI for AWS S3 Vectors with RAG capabilities.
 
 ![welcome.png](docs/welcome.png)
 
-Unofficial CLI for AWS S3 Vectors with RAG capabilities.
+![ingest-docs.png](docs/ingest-docs.png)
+
+![query-contexts.png](docs/query-contexts.png)
 
 ## Installation
 
@@ -23,6 +26,9 @@ s3-vectors
 s3-vectors bucket create my-vectors
 s3-vectors index create my-vectors embeddings -d 384
 
+# Query buckets
+s3-vectors bucket query prod --status active
+
 # Add vectors
 s3-vectors vector put my-vectors embeddings key1 -d "0.1,0.2,0.3..."
 
@@ -34,10 +40,12 @@ s3-vectors vector query my-vectors embeddings -q "0.1,0.2,0.3..." -t 10
 
 ### Bucket Operations
 - `bucket create/list/get/delete <name>`
+- `bucket query [pattern] [--status active] [--created-after date]`
 
 ### Index Operations
 - `index create <bucket> <name> -d <dimensions> [-m cosine|euclidean]`
-- `index list/get/delete <bucket> <name>`
+- `index list <bucket> [--query "natural language search"]`
+- `index get/delete <bucket> <name>`
 
 ### Vector Operations
 - `vector put <bucket> <index> <key> -d <data> [-m metadata]`
@@ -45,6 +53,23 @@ s3-vectors vector query my-vectors embeddings -q "0.1,0.2,0.3..." -t 10
 - `vector get <bucket> <index> <keys>`
 - `vector query <bucket> <index> -q <vector> -t <top_k>`
 - `vector delete <bucket> <index> <keys>`
+
+### RAG Operations
+```
+# Initialize RAG pipeline
+s3-vectors rag init --bucket rag-demo-sigrid --index documents-sigrid
+
+# Ingest documents
+s3-vectors rag ingest --directory ./docs --bucket rag-demo-sigrid --index documents-sigrid
+
+# Query with natural language
+s3-vectors rag query "what is AI?" --top-k 5 --bucket rag-demo-sigrid --index documents-sigrid
+
+# Or use interactive mode
+s3-vectors rag interactive --bucket rag-demo-sigrid --index documents-sigrid
+> what is AI?
+> how does machine learning work?
+```
 
 ### Policy Management
 - `policy put/get/delete <bucket> [-f file | -p inline]`
@@ -80,7 +105,7 @@ Run `s3-vectors` without arguments for REPL mode:
 - `AWS_PROFILE`
 
 ## Demo
-### RAGDemo
+### RAG Demo
 ```
 cargo build --release --example rag_demo
 cargo run --example rag_demo -- init
