@@ -331,8 +331,8 @@ mod tests {
     #[tokio::test]
     async fn test_rag_config() {
         let config = RagConfig::default();
-        assert_eq!(config.bucket_name, "rag-vectors");
-        assert_eq!(config.index_name, "documents");
+        assert_eq!(config.bucket_name, "rag-vectors-sigrid");
+        assert_eq!(config.index_name, "documents-sigrid");
         assert_eq!(config.embedding_batch_size, 32);
     }
 }

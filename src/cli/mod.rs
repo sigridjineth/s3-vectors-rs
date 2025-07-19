@@ -1,5 +1,6 @@
 pub mod bucket;
 pub mod index;
+pub mod interactive;
 pub mod output;
 pub mod policy;
 pub mod vector;
@@ -17,7 +18,7 @@ use std::fmt;
 )]
 pub struct Cli {
     #[command(subcommand)]
-    pub command: Commands,
+    pub command: Option<Commands>,
     
     #[arg(
         short,
@@ -93,5 +94,42 @@ impl fmt::Display for OutputFormat {
             OutputFormat::Table => write!(f, "table"),
             OutputFormat::Yaml => write!(f, "yaml"),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use clap::Parser;
+
+    #[test]
+    fn test_parse_cli_without_command() {
+        // Test that CLI can be parsed without a command (for interactive mode)
+        let args = vec!["s3-vectors"];
+        let cli = Cli::try_parse_from(args).unwrap();
+        assert!(cli.command.is_none());
+    }
+
+    #[test]
+    fn test_parse_cli_with_bucket_command() {
+        let args = vec!["s3-vectors", "bucket", "list"];
+        let cli = Cli::try_parse_from(args).unwrap();
+        assert!(matches!(cli.command, Some(Commands::Bucket(_))));
+    }
+
+    #[test]
+    fn test_parse_cli_with_global_options() {
+        let args = vec!["s3-vectors", "--region", "us-west-2", "--verbose", "bucket", "list"];
+        let cli = Cli::try_parse_from(args).unwrap();
+        assert_eq!(cli.region, "us-west-2");
+        assert!(cli.verbose);
+        assert!(matches!(cli.command, Some(Commands::Bucket(_))));
+    }
+
+    #[test]
+    fn test_output_format_display() {
+        assert_eq!(OutputFormat::Json.to_string(), "json");
+        assert_eq!(OutputFormat::Table.to_string(), "table");
+        assert_eq!(OutputFormat::Yaml.to_string(), "yaml");
     }
 }

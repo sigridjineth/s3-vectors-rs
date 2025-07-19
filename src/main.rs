@@ -1,6 +1,6 @@
 use anyhow::Result;
 use clap::Parser;
-use s3_vectors::cli::{Cli, Commands};
+use s3_vectors::cli::{Cli, Commands, interactive::InteractiveMode};
 use s3_vectors::S3VectorsClient;
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
@@ -39,12 +39,17 @@ async fn main() -> Result<()> {
         );
     }
     
-    // Execute the appropriate command
+    // Execute the appropriate command or enter interactive mode
     match &cli.command {
-        Commands::Bucket(cmd) => cmd.execute(&client, cli.output).await?,
-        Commands::Index(cmd) => cmd.execute(&client, cli.output).await?,
-        Commands::Vector(cmd) => cmd.execute(&client, cli.output).await?,
-        Commands::Policy(cmd) => cmd.execute(&client, cli.output).await?,
+        Some(Commands::Bucket(cmd)) => cmd.execute(&client, cli.output).await?,
+        Some(Commands::Index(cmd)) => cmd.execute(&client, cli.output).await?,
+        Some(Commands::Vector(cmd)) => cmd.execute(&client, cli.output).await?,
+        Some(Commands::Policy(cmd)) => cmd.execute(&client, cli.output).await?,
+        None => {
+            // Enter interactive mode
+            let interactive = InteractiveMode::new(client, cli.output, cli.verbose);
+            interactive.run().await?;
+        }
     }
     
     Ok(())

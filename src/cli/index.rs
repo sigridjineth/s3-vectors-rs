@@ -40,7 +40,7 @@ pub enum IndexSubcommands {
         #[arg(short, long, help = "Maximum number of results", default_value = "100")]
         max_results: u32,
         
-        #[arg(short, long, help = "Prefix to filter index names")]
+        #[arg(long, help = "Prefix to filter index names")]
         prefix: Option<String>,
     },
     
@@ -66,7 +66,7 @@ pub enum IndexSubcommands {
     },
 }
 
-#[derive(Debug, Clone, Copy, clap::ValueEnum)]
+#[derive(Debug, Clone, Copy, clap::ValueEnum, PartialEq)]
 pub enum DistanceMetricArg {
     Euclidean,
     Cosine,
@@ -277,7 +277,7 @@ mod tests {
                 assert_eq!(bucket, "my-bucket");
                 assert_eq!(name, "my-index");
                 assert_eq!(dimensions, 384);
-                // metric would be DistanceMetricArg::Cosine by default
+                assert_eq!(metric, DistanceMetricArg::Cosine);
             }
             _ => panic!("Expected Create command"),
         }

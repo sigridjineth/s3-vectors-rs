@@ -8,6 +8,92 @@ cargo build --release
 
 ## Usage
 
+# S3 Vectors Interactive Mode
+
+## Overview
+
+S3 Vectors CLI now supports an interactive mode that provides a REPL (Read-Eval-Print Loop) experience for managing your vector data.
+
+## Entering Interactive Mode
+
+Simply run the CLI without any subcommands:
+
+```bash
+s3-vectors
+```
+
+You'll be greeted with an ASCII banner and helpful tips to get started.
+
+## Available Commands
+
+In interactive mode, you can use all the same commands as the regular CLI, but without the `s3-vectors` prefix:
+
+### Bucket Management
+- `bucket create my-vectors` - Create a new vector bucket
+- `bucket list` - List all vector buckets
+- `bucket get my-vectors` - Get bucket details
+- `bucket delete my-vectors` - Delete a bucket
+
+### Index Management
+- `index create my-bucket my-index -d 384` - Create an index with 384 dimensions
+- `index list my-bucket` - List indexes in a bucket
+- `index get my-bucket my-index` - Get index details
+- `index delete my-bucket my-index` - Delete an index
+
+### Vector Operations
+- `vector put my-bucket my-index key1 -d 0.1,0.2,0.3` - Add a vector
+- `vector get my-bucket my-index key1` - Retrieve a vector
+- `vector query my-bucket my-index -q 0.1,0.2,0.3 -t 10` - Query similar vectors
+- `vector delete my-bucket my-index key1` - Delete a vector
+
+### Policy Management
+- `policy put my-bucket --file policy.json` - Set bucket policy
+- `policy get my-bucket` - Get bucket policy
+- `policy delete my-bucket` - Delete bucket policy
+
+## Special Commands
+
+- `help`, `/help`, `?` - Show available commands
+- `clear`, `/clear` - Clear the screen
+- `exit`, `quit`, `/exit`, `/quit` - Exit interactive mode
+
+## Examples
+
+```bash
+# Start interactive mode
+$ s3-vectors
+
+# Create a bucket
+s3-vectors> bucket create my-vectors
+
+# Create an index
+s3-vectors> index create my-vectors embeddings -d 384
+
+# Add some vectors
+s3-vectors> vector put my-vectors embeddings doc1 -d 0.1,0.2,0.3...
+s3-vectors> vector put my-vectors embeddings doc2 -d 0.2,0.3,0.4...
+
+# Query for similar vectors
+s3-vectors> vector query my-vectors embeddings -q 0.15,0.25,0.35... -t 5
+
+# Exit
+s3-vectors> exit
+```
+
+## Features
+
+- **Command History**: Use up/down arrows to navigate through previous commands
+- **Auto-completion**: Tab completion for commands (when supported by terminal)
+- **Colored Output**: Enhanced readability with syntax highlighting
+- **Error Handling**: Friendly error messages guide you to correct usage
+
+## Tips
+
+1. All commands support the same options as the regular CLI
+2. You can still use global options like `--output json` for different output formats
+3. The interactive mode respects environment variables like `AWS_REGION` and `AWS_PROFILE`
+4. Use `--verbose` flag with commands for detailed output
+
 ### Global Options
 
 ```bash

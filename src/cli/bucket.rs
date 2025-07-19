@@ -31,7 +31,7 @@ pub enum BucketSubcommands {
         #[arg(short, long, help = "Maximum number of results", default_value = "100")]
         max_results: u32,
         
-        #[arg(short, long, help = "Prefix to filter bucket names")]
+        #[arg(long, help = "Prefix to filter bucket names")]
         prefix: Option<String>,
     },
     
