@@ -3,6 +3,7 @@ use serde_json::Value;
 
 // Enums
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+#[derive(clap::ValueEnum)]
 pub enum BucketStatus {
     Creating,
     Active,

@@ -1,5 +1,7 @@
 # AWS S3 Vectors Rust CLI
 
+![welcome.png](docs/welcome.png)
+
 Unofficial CLI for AWS S3 Vectors with RAG capabilities.
 
 ## Installation

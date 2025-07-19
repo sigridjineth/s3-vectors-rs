@@ -101,6 +101,7 @@ impl InteractiveMode {
         println!("{}", "  Quick Start:".yellow().bold());
         println!("  ╭─────────────────────────────────────────────────────────────────────╮");
         println!("  │ • Create a bucket:  {:<47} │", "bucket create my-vectors".cyan());
+        println!("  │ • Query buckets:    {:<47} │", "bucket query prod --status active".cyan());
         println!("  │ • Create an index:  {:<47} │", "index create my-bucket my-index -d 384".cyan());
         println!("  │ • Add vectors:      {:<47} │", "vector put my-bucket my-index key1 -d 0.1,0.2".cyan());
         println!("  │ • Search vectors:   {:<47} │", "vector query my-bucket my-index -q 0.1,0.2".cyan());
@@ -117,7 +118,7 @@ impl InteractiveMode {
         println!("{}", "╠══════════════════════════════════════════════════════════════════════════════╣".blue());
         println!("{}", "║                                                                              ║".blue());
         println!("{} {} {:<60} {}", "║".blue(), "bucket".cyan().bold(), "- Manage vector buckets",    "║".blue());
-        println!("{} {:<72} {}", "║".blue(), "       create, list, get, delete",                      "║".blue());
+        println!("{} {:<72} {}", "║".blue(), "       create, list, query, get, delete",              "║".blue());
         println!("{}", "║                                                                              ║".blue());
         println!("{} {} {:<60} {}", "║".blue(), "index ".cyan().bold(), "- Manage vector indexes",    "║".blue());
         println!("{} {:<72} {}", "║".blue(), "       create, list, get, delete",                      "║".blue());
