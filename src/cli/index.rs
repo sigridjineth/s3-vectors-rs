@@ -1,6 +1,6 @@
 use crate::cli::output::{print_output, print_table};
 use crate::cli::OutputFormat;
-use crate::{CreateIndexRequest, DistanceMetric, S3VectorsClient};
+use crate::{CreateIndexRequest, DistanceMetric, S3VectorsClient, ListIndexesResponse};
 use anyhow::Result;
 use clap::{Args, Subcommand};
 use serde::Serialize;
@@ -42,6 +42,9 @@ pub enum IndexSubcommands {
         
         #[arg(long, help = "Prefix to filter index names")]
         prefix: Option<String>,
+        
+        #[arg(short = 'q', long, help = "Natural language query to search indexes")]
+        query: Option<String>,
     },
     
     #[command(about = "Get index details")]
@@ -96,8 +99,8 @@ impl IndexCommand {
             IndexSubcommands::Create { bucket, name, dimensions, metric, metadata_config } => {
                 self.create_index(client, bucket, name, *dimensions, *metric, metadata_config.as_deref(), output_format).await
             }
-            IndexSubcommands::List { bucket, max_results, prefix } => {
-                self.list_indexes(client, bucket, *max_results, prefix.as_deref(), output_format).await
+            IndexSubcommands::List { bucket, max_results, prefix, query } => {
+                self.list_indexes(client, bucket, *max_results, prefix.as_deref(), query.as_deref(), output_format).await
             }
             IndexSubcommands::Get { bucket, name } => {
                 self.get_index(client, bucket, name, output_format).await
@@ -161,29 +164,72 @@ impl IndexCommand {
         client: &S3VectorsClient,
         bucket: &str,
         max_results: u32,
-        _prefix: Option<&str>,
+        prefix: Option<&str>,
+        query: Option<&str>,
         output_format: OutputFormat,
     ) -> Result<()> {
         let response = client.list_indexes(bucket, Some(max_results), None).await?;
         
+        // Apply filters
+        let mut filtered_indexes = response.indexes;
+        
+        // Apply prefix filter if provided
+        if let Some(p) = prefix {
+            filtered_indexes.retain(|idx| idx.index_name.starts_with(p));
+        }
+        
+        // Apply natural language query if provided
+        if let Some(q) = query {
+            println!("Searching indexes for: \"{}\"", q);
+            
+            // For now, do simple keyword matching on index names
+            // In the future, this could be enhanced with:
+            // 1. Semantic search using embeddings
+            // 2. Searching vector metadata within indexes
+            // 3. Integration with RAG for more sophisticated queries
+            let query_lower = q.to_lowercase();
+            let keywords: Vec<&str> = query_lower.split_whitespace().collect();
+            
+            filtered_indexes.retain(|idx| {
+                let name_lower = idx.index_name.to_lowercase();
+                keywords.iter().any(|&keyword| name_lower.contains(keyword))
+            });
+            
+            if filtered_indexes.is_empty() {
+                println!("No indexes found matching query: \"{}\"", q);
+                println!("Try different keywords or check the index names.");
+            }
+        }
+        
         match output_format {
             OutputFormat::Table => {
-                let indexes: Vec<IndexInfo> = response.indexes
+                // For list command, we only have summary info
+                // We'll need to make individual get calls if we want full details
+                let indexes: Vec<IndexInfo> = filtered_indexes
                     .iter()
                     .map(|idx| IndexInfo {
                         name: idx.index_name.clone(),
-                        dimensions: idx.dimension,
-                        metric: format!("{:?}", idx.distance_metric),
-                        status: format!("{:?}", idx.status),
-                        vectors: idx.vector_count
-                            .map(|c| c.to_string())
-                            .unwrap_or_else(|| "0".to_string()),
+                        dimensions: 0, // Not available in summary
+                        metric: "N/A".to_string(), // Not available in summary
+                        status: "Active".to_string(), // Assume active for listed indexes
+                        vectors: "N/A".to_string(), // Not available in summary
                     })
                     .collect();
                 
+                if query.is_some() && !indexes.is_empty() {
+                    println!("\nFound {} indexes matching your query:", indexes.len());
+                }
+                
                 print_table(indexes)?;
             }
-            _ => print_output(&response, output_format)?,
+            _ => {
+                // For JSON/YAML output, return filtered results
+                let filtered_response = ListIndexesResponse {
+                    indexes: filtered_indexes,
+                    next_token: response.next_token,
+                };
+                print_output(&filtered_response, output_format)?;
+            }
         }
         
         Ok(())
@@ -289,7 +335,7 @@ mod tests {
         let cli = TestCli::parse_from(args);
         
         match cli.command {
-            IndexSubcommands::List { bucket, max_results, prefix } => {
+            IndexSubcommands::List { bucket, max_results, prefix, query: _ } => {
                 assert_eq!(bucket, "my-bucket");
                 assert_eq!(max_results, 100); // default
                 assert!(prefix.is_none());

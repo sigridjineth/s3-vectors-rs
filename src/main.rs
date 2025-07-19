@@ -45,6 +45,7 @@ async fn main() -> Result<()> {
         Some(Commands::Index(cmd)) => cmd.execute(&client, cli.output).await?,
         Some(Commands::Vector(cmd)) => cmd.execute(&client, cli.output).await?,
         Some(Commands::Policy(cmd)) => cmd.execute(&client, cli.output).await?,
+        Some(Commands::Rag(cmd)) => cmd.execute(&client, cli.output).await?,
         None => {
             // Enter interactive mode
             let interactive = InteractiveMode::new(client, cli.output, cli.verbose);

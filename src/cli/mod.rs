@@ -5,6 +5,7 @@ pub mod install_models;
 pub mod interactive;
 pub mod output;
 pub mod policy;
+pub mod rag;
 pub mod vector;
 
 use clap::{Parser, Subcommand};
@@ -86,9 +87,12 @@ pub enum Commands {
     
     #[command(about = "Manage bucket policies")]
     Policy(policy::PolicyCommand),
+    
+    #[command(about = "RAG (Retrieval-Augmented Generation) operations")]
+    Rag(rag::RagCommand),
 }
 
-#[derive(Debug, Clone, Copy, clap::ValueEnum)]
+#[derive(Debug, Clone, Copy, PartialEq, clap::ValueEnum)]
 pub enum OutputFormat {
     Json,
     Table,

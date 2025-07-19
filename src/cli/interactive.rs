@@ -103,8 +103,11 @@ impl InteractiveMode {
         println!("  │ • Create a bucket:  {:<47} │", "bucket create my-vectors".cyan());
         println!("  │ • Query buckets:    {:<47} │", "bucket query prod --status active".cyan());
         println!("  │ • Create an index:  {:<47} │", "index create my-bucket my-index -d 384".cyan());
+        println!("  │ • Query indexes:    {:<47} │", "index list my-bucket --query \"embeddings\"".cyan());
         println!("  │ • Add vectors:      {:<47} │", "vector put my-bucket my-index key1 -d 0.1,0.2".cyan());
         println!("  │ • Search vectors:   {:<47} │", "vector query my-bucket my-index -q 0.1,0.2".cyan());
+        println!("  │ • RAG ingest:       {:<47} │", "rag ingest --directory ./docs".cyan());
+        println!("  │ • RAG query:        {:<47} │", "rag query 'What is S3 Vectors?'".cyan());
         println!("  ╰─────────────────────────────────────────────────────────────────────╯");
         println!();
         println!("  {} Type {} for available commands or {} to quit.", "💡".yellow(), "help".green().bold(), "exit".red().bold());
@@ -121,13 +124,16 @@ impl InteractiveMode {
         println!("{} {:<72} {}", "║".blue(), "       create, list, query, get, delete",              "║".blue());
         println!("{}", "║                                                                              ║".blue());
         println!("{} {} {:<60} {}", "║".blue(), "index ".cyan().bold(), "- Manage vector indexes",    "║".blue());
-        println!("{} {:<72} {}", "║".blue(), "       create, list, get, delete",                      "║".blue());
+        println!("{} {:<72} {}", "║".blue(), "       create, list [--query \"search\"], get, delete",    "║".blue());
         println!("{}", "║                                                                              ║".blue());
         println!("{} {} {:<60} {}", "║".blue(), "vector".cyan().bold(), "- Manage vectors",           "║".blue());
         println!("{} {:<72} {}", "║".blue(), "       put, get, list, delete, query",                  "║".blue());
         println!("{}", "║                                                                              ║".blue());
         println!("{} {} {:<60} {}", "║".blue(), "policy".cyan().bold(), "- Manage bucket policies",   "║".blue());
         println!("{} {:<72} {}", "║".blue(), "       put, get, delete",                               "║".blue());
+        println!("{}", "║                                                                              ║".blue());
+        println!("{} {} {:<64} {}", "║".blue(), "rag   ".cyan().bold(), "- RAG operations",          "║".blue());
+        println!("{} {:<72} {}", "║".blue(), "       init, ingest, query, interactive",               "║".blue());
         println!("{}", "║                                                                              ║".blue());
         println!("{}", "╠══════════════════════════════════════════════════════════════════════════════╣".blue());
         println!("{}", "║                            SPECIAL COMMANDS                                  ║".blue());
@@ -147,10 +153,61 @@ impl InteractiveMode {
         print!("\x1B[2J\x1B[1;1H");
     }
 
+    /// Parse command arguments handling quoted strings properly
+    fn parse_command_args(&self, input: &str) -> Result<Vec<String>> {
+        let mut args = Vec::new();
+        let mut current_arg = String::new();
+        let mut in_quotes = false;
+        let mut chars = input.chars().peekable();
+        let mut escape_next = false;
+        
+        while let Some(ch) = chars.next() {
+            if escape_next {
+                // If we're escaping, just add the character as-is
+                current_arg.push(ch);
+                escape_next = false;
+                continue;
+            }
+            
+            match ch {
+                '\\' if in_quotes => {
+                    // Start escape sequence
+                    escape_next = true;
+                    current_arg.push(ch); // Keep the backslash
+                }
+                '"' => {
+                    in_quotes = !in_quotes;
+                    // Don't include the quotes in the argument
+                }
+                ' ' if !in_quotes => {
+                    if !current_arg.is_empty() {
+                        args.push(current_arg);
+                        current_arg = String::new();
+                    }
+                }
+                _ => {
+                    current_arg.push(ch);
+                }
+            }
+        }
+        
+        // Push the last argument if any
+        if !current_arg.is_empty() {
+            args.push(current_arg);
+        }
+        
+        // Check for unclosed quotes
+        if in_quotes {
+            return Err(anyhow::anyhow!("Unclosed quote in command"));
+        }
+        
+        Ok(args)
+    }
+
     async fn execute_command(&self, input: &str) -> Result<()> {
         // Prepend "s3-vectors" to make it parseable by clap
-        let args = format!("s3-vectors {}", input);
-        let args: Vec<&str> = args.split_whitespace().collect();
+        let args_str = format!("s3-vectors {}", input);
+        let args = self.parse_command_args(&args_str)?;
 
         // Parse the command using a temporary CLI struct for commands only
         #[derive(Parser)]
@@ -159,7 +216,7 @@ impl InteractiveMode {
             command: Commands,
         }
 
-        match TempCli::try_parse_from(&args) {
+        match TempCli::try_parse_from(args.iter().map(|s| s.as_str())) {
             Ok(parsed) => {
                 // Execute the command
                 match parsed.command {
@@ -173,6 +230,7 @@ impl InteractiveMode {
                     Commands::Index(cmd) => cmd.execute(&self.client, self.output_format).await?,
                     Commands::Vector(cmd) => cmd.execute(&self.client, self.output_format).await?,
                     Commands::Policy(cmd) => cmd.execute(&self.client, self.output_format).await?,
+                    Commands::Rag(cmd) => cmd.execute(&self.client, self.output_format).await?,
                 }
             }
             Err(e) => {
@@ -224,6 +282,32 @@ mod tests {
     }
 
     #[test]
+    fn test_parse_command_args() {
+        let interactive = InteractiveMode::new(
+            S3VectorsClient::from_env().unwrap(),
+            OutputFormat::Table,
+            false
+        );
+        
+        // Test simple args
+        let args = interactive.parse_command_args("s3-vectors bucket list").unwrap();
+        assert_eq!(args, vec!["s3-vectors", "bucket", "list"]);
+        
+        // Test quoted args
+        let args = interactive.parse_command_args("s3-vectors index list my-bucket --query \"how many apples\"").unwrap();
+        assert_eq!(args, vec!["s3-vectors", "index", "list", "my-bucket", "--query", "how many apples"]);
+        
+        // Test multiple quoted args (escape sequences are preserved but quotes are removed)
+        let args = interactive.parse_command_args("s3-vectors vector put bucket index key -m \"{\\\"key\\\": \\\"value\\\"}\"").unwrap();
+        assert_eq!(args.len(), 8);
+        assert_eq!(args[7], "{\\\"key\\\": \\\"value\\\"}");
+        
+        // Test unclosed quote error
+        let result = interactive.parse_command_args("s3-vectors index list --query \"unclosed");
+        assert!(result.is_err());
+    }
+
+    #[test]
     fn test_parse_index_create_command() {
         // Test parsing "index create my-bucket my-index -d 384"
         let args = "s3-vectors index create my-bucket my-index -d 384";
@@ -245,6 +329,34 @@ mod tests {
                 assert_eq!(dimensions, 384);
             },
             _ => panic!("Expected index create command"),
+        }
+    }
+    
+    #[test]
+    fn test_parse_index_list_with_query() {
+        // Test parsing "index list my-bucket --query \"document embeddings\""
+        let interactive = InteractiveMode::new(
+            S3VectorsClient::from_env().unwrap(),
+            OutputFormat::Table,
+            false
+        );
+        let args = interactive.parse_command_args("s3-vectors index list my-bucket --query \"document embeddings\"").unwrap();
+        
+        #[derive(Parser)]
+        struct TempCli {
+            #[command(subcommand)]
+            command: Commands,
+        }
+        
+        let parsed = TempCli::try_parse_from(args.iter().map(|s| s.as_str())).unwrap();
+        match parsed.command {
+            Commands::Index(IndexCommand { 
+                command: IndexSubcommands::List { bucket, query, .. } 
+            }) => {
+                assert_eq!(bucket, "my-bucket");
+                assert_eq!(query.unwrap(), "document embeddings");
+            },
+            _ => panic!("Expected index list command with query"),
         }
     }
 
@@ -363,6 +475,31 @@ mod tests {
                 assert!(force);
             },
             _ => panic!("Expected bucket delete command"),
+        }
+    }
+
+    #[test]
+    fn test_parse_bucket_query_command() {
+        // Test parsing bucket query with multiple filters
+        let args = "s3-vectors bucket query prod --status active --created-after yesterday";
+        let args: Vec<&str> = args.split_whitespace().collect();
+        
+        #[derive(Parser)]
+        struct TempCli {
+            #[command(subcommand)]
+            command: Commands,
+        }
+        
+        let parsed = TempCli::try_parse_from(&args).unwrap();
+        match parsed.command {
+            Commands::Bucket(BucketCommand { 
+                command: BucketSubcommands::Query { pattern, status, created_after, .. } 
+            }) => {
+                assert_eq!(pattern, Some("prod".to_string()));
+                assert_eq!(status, Some(crate::types::BucketStatus::Active));
+                assert_eq!(created_after, Some("yesterday".to_string()));
+            },
+            _ => panic!("Expected bucket query command"),
         }
     }
 }

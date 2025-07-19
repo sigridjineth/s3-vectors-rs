@@ -317,7 +317,7 @@ mod tests {
     #[test]
     fn test_single_embedding() {
         let text = "This is a test sentence.";
-        let embedding = embed_text(text).unwrap();
+        let embedding = embed_text(text).expect("Failed to embed test text");
         assert_eq!(embedding.len(), 384);
         
         // Check that embedding is normalized (L2 norm ≈ 1)
@@ -332,7 +332,7 @@ mod tests {
             "Second test sentence with more words.",
             "Third one.",
         ];
-        let embeddings = embed_texts(&texts).unwrap();
+        let embeddings = embed_texts(&texts).expect("Failed to embed test texts");
         
         assert_eq!(embeddings.len(), 3);
         for embedding in &embeddings {
