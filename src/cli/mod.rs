@@ -22,7 +22,7 @@ use std::fmt;
 pub struct Cli {
     #[command(subcommand)]
     pub command: Option<Commands>,
-    
+
     #[arg(
         short,
         long,
@@ -32,7 +32,7 @@ pub struct Cli {
         default_value = "us-east-1"
     )]
     pub region: String,
-    
+
     #[arg(
         short,
         long,
@@ -41,7 +41,7 @@ pub struct Cli {
         env = "AWS_PROFILE"
     )]
     pub profile: Option<String>,
-    
+
     #[arg(
         short,
         long,
@@ -51,20 +51,11 @@ pub struct Cli {
         default_value = "table"
     )]
     pub output: OutputFormat,
-    
-    #[arg(
-        long,
-        global = true,
-        help = "Disable SSL certificate verification"
-    )]
+
+    #[arg(long, global = true, help = "Disable SSL certificate verification")]
     pub no_verify_ssl: bool,
-    
-    #[arg(
-        short,
-        long,
-        global = true,
-        help = "Enable verbose output"
-    )]
+
+    #[arg(short, long, global = true, help = "Enable verbose output")]
     pub verbose: bool,
 }
 
@@ -72,22 +63,22 @@ pub struct Cli {
 pub enum Commands {
     #[command(about = "Initialize AWS credentials")]
     Init(init::InitCommand),
-    
+
     #[command(about = "Download ML models for RAG functionality")]
     InstallModels(install_models::InstallModelsCommand),
-    
+
     #[command(about = "Manage vector buckets")]
     Bucket(bucket::BucketCommand),
-    
+
     #[command(about = "Manage vector indexes")]
     Index(index::IndexCommand),
-    
+
     #[command(about = "Manage vectors")]
     Vector(vector::VectorCommand),
-    
+
     #[command(about = "Manage bucket policies")]
     Policy(policy::PolicyCommand),
-    
+
     #[command(about = "RAG (Retrieval-Augmented Generation) operations")]
     Rag(rag::RagCommand),
 }
@@ -131,7 +122,14 @@ mod tests {
 
     #[test]
     fn test_parse_cli_with_global_options() {
-        let args = vec!["s3-vectors", "--region", "us-west-2", "--verbose", "bucket", "list"];
+        let args = vec![
+            "s3-vectors",
+            "--region",
+            "us-west-2",
+            "--verbose",
+            "bucket",
+            "list",
+        ];
         let cli = Cli::try_parse_from(args).unwrap();
         assert_eq!(cli.region, "us-west-2");
         assert!(cli.verbose);

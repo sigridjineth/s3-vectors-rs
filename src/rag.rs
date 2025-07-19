@@ -53,19 +53,21 @@ pub struct RagPipeline {
 impl RagPipeline {
     pub fn new(config: RagConfig, client: S3VectorsClient) -> Self {
         let document_processor = DocumentProcessor::with_default_config();
-        
+
         Self {
             config,
             client,
             document_processor,
         }
     }
-    
+
     /// Initialize the S3 Vectors bucket and index
     pub async fn initialize(&self) -> Result<()> {
-        info!("Initializing RAG pipeline with bucket: {} and index: {}", 
-              self.config.bucket_name, self.config.index_name);
-        
+        info!(
+            "Initializing RAG pipeline with bucket: {} and index: {}",
+            self.config.bucket_name, self.config.index_name
+        );
+
         create_bucket_and_index(
             &self.client,
             &self.config.bucket_name,
@@ -75,56 +77,60 @@ impl RagPipeline {
         )
         .await
         .context("Failed to create bucket and index")?;
-        
+
         Ok(())
     }
-    
+
     /// Ingest documents from a directory
     pub async fn ingest_documents(&self, dir_path: &Path) -> Result<()> {
         let start_time = Instant::now();
         info!("Starting document ingestion from: {}", dir_path.display());
-        
+
         // Process all documents in the directory
-        let documents: Vec<Document> = self.document_processor
-            .process_directory(dir_path)
-            .await?;
-        
+        let documents: Vec<Document> = self.document_processor.process_directory(dir_path).await?;
+
         if documents.is_empty() {
             warn!("No documents found in directory");
             return Ok(());
         }
-        
+
         info!("Found {} documents to process", documents.len());
-        
+
         // Process documents in parallel using channels
         let (sender, receiver) = unbounded::<(DocumentChunk, Vec<f32>)>();
-        
+
         // Spawn a task to handle vector uploads
         let bucket_name = self.config.bucket_name.clone();
         let index_name = self.config.index_name.clone();
         let batch_size = self.config.vector_upload_batch_size;
         let client = self.client.clone();
-        
+
         let upload_handle = tokio::spawn(async move {
             let mut buffer = Vec::new();
             let mut total_uploaded = 0;
             let mut total_chunks = 0;
             let mut first_error = None;
-            
+
             while let Ok((chunk, embedding)) = receiver.recv() {
                 total_chunks += 1;
                 let vector = Vector {
                     key: chunk.id.clone(),
-                    data: VectorData {
-                        float32: embedding,
-                    },
+                    data: VectorData { float32: embedding },
                     metadata: Some(chunk.metadata),
                 };
-                
+
                 buffer.push(vector);
-                
+
                 if buffer.len() >= batch_size {
-                    match batch_put_vectors(&client, &bucket_name, &index_name, buffer.clone(), embeddings::embedding_dimensions()).await {
+                    match batch_put_vectors(
+                        &client,
+                        &bucket_name,
+                        &index_name,
+                        buffer.clone(),
+                        embeddings::embedding_dimensions(),
+                    )
+                    .await
+                    {
                         Ok(_) => {
                             total_uploaded += buffer.len();
                             debug!("Uploaded batch of {} vectors", buffer.len());
@@ -139,10 +145,18 @@ impl RagPipeline {
                     buffer.clear();
                 }
             }
-            
+
             // Upload remaining vectors
             if !buffer.is_empty() {
-                match batch_put_vectors(&client, &bucket_name, &index_name, buffer.clone(), embeddings::embedding_dimensions()).await {
+                match batch_put_vectors(
+                    &client,
+                    &bucket_name,
+                    &index_name,
+                    buffer.clone(),
+                    embeddings::embedding_dimensions(),
+                )
+                .await
+                {
                     Ok(_) => {
                         total_uploaded += buffer.len();
                         debug!("Uploaded final batch of {} vectors", buffer.len());
@@ -155,56 +169,68 @@ impl RagPipeline {
                     }
                 }
             }
-            
-            info!("Total vectors uploaded: {} out of {}", total_uploaded, total_chunks);
-            
+
+            info!(
+                "Total vectors uploaded: {} out of {}",
+                total_uploaded, total_chunks
+            );
+
             if let Some(error) = first_error {
                 if total_uploaded == 0 {
                     Err(anyhow::anyhow!("Failed to upload any vectors: {}", error))
                 } else {
-                    Err(anyhow::anyhow!("Partial upload: {} of {} vectors uploaded. First error: {}", 
-                        total_uploaded, total_chunks, error))
+                    Err(anyhow::anyhow!(
+                        "Partial upload: {} of {} vectors uploaded. First error: {}",
+                        total_uploaded,
+                        total_chunks,
+                        error
+                    ))
                 }
             } else {
                 Ok(total_uploaded)
             }
         });
-        
+
         // Process documents and generate embeddings in parallel
         let semaphore = std::sync::Arc::new(Semaphore::new(self.config.max_concurrent_embeddings));
-        
+
         documents.par_iter().for_each(|document| {
             match self.process_document(document, &sender, &semaphore) {
                 Ok(chunks_processed) => {
-                    debug!("Processed {} chunks from document: {}", chunks_processed, document.id);
+                    debug!(
+                        "Processed {} chunks from document: {}",
+                        chunks_processed, document.id
+                    );
                 }
                 Err(e) => {
                     tracing::error!("Error processing document {}: {:?}", document.id, e);
                 }
             }
         });
-        
+
         // Close the channel
         drop(sender);
-        
+
         // Wait for upload to complete
-        let upload_result = upload_handle.await
-            .context("Upload task panicked")?;
-        
+        let upload_result = upload_handle.await.context("Upload task panicked")?;
+
         let elapsed = start_time.elapsed();
-        
+
         match upload_result {
             Ok(count) => {
-                info!("Document ingestion completed in {:?}. Uploaded {} vectors.", elapsed, count);
+                info!(
+                    "Document ingestion completed in {:?}. Uploaded {} vectors.",
+                    elapsed, count
+                );
                 Ok(())
-            },
+            }
             Err(e) => {
                 tracing::error!("Document ingestion failed: {}", e);
                 Err(e)
             }
         }
     }
-    
+
     /// Process a single document
     fn process_document(
         &self,
@@ -215,7 +241,7 @@ impl RagPipeline {
         // Split document into chunks
         let chunks = self.document_processor.chunk_document(document)?;
         let chunk_count = chunks.len();
-        
+
         // Process chunks in batches
         for batch in chunks.chunks(self.config.embedding_batch_size) {
             // Acquire semaphore permit
@@ -224,7 +250,7 @@ impl RagPipeline {
                 // If no permit available, process synchronously
                 let texts: Vec<&str> = batch.iter().map(|c| c.content.as_str()).collect();
                 let embeddings = embeddings::embed_texts(&texts)?;
-                
+
                 for (chunk, embedding) in batch.iter().zip(embeddings.iter()) {
                     sender.send((chunk.clone(), embedding.clone()))?;
                 }
@@ -232,16 +258,16 @@ impl RagPipeline {
                 // Process with permit
                 let texts: Vec<&str> = batch.iter().map(|c| c.content.as_str()).collect();
                 let embeddings = embeddings::embed_texts(&texts)?;
-                
+
                 for (chunk, embedding) in batch.iter().zip(embeddings.iter()) {
                     sender.send((chunk.clone(), embedding.clone()))?;
                 }
             }
         }
-        
+
         Ok(chunk_count)
     }
-    
+
     /// Search for relevant documents
     pub async fn search(
         &self,
@@ -250,11 +276,10 @@ impl RagPipeline {
         filter: Option<serde_json::Value>,
     ) -> Result<Vec<RagSearchResult>> {
         info!("Searching for: {}", query);
-        
+
         // Generate embedding for query
-        let query_embedding = embeddings::embed_text(query)
-            .context("Failed to embed query")?;
-        
+        let query_embedding = embeddings::embed_text(query).context("Failed to embed query")?;
+
         // Create query request
         let query_request = QueryVectorsRequest {
             vector_bucket_name: self.config.bucket_name.clone(),
@@ -267,20 +292,21 @@ impl RagPipeline {
             return_metadata: true,
             return_distance: true,
         };
-        
+
         // Execute query
-        let response = self.client
+        let response = self
+            .client
             .query_vectors(query_request)
             .await
             .context("Failed to query vectors")?;
-        
+
         // Convert results
         let results: Vec<RagSearchResult> = response
             .vectors
             .into_iter()
             .map(|matched| {
                 let score = matched.distance.map(|d| 1.0 - d).unwrap_or(0.0);
-                
+
                 // Extract content from metadata
                 let content = matched
                     .metadata
@@ -289,7 +315,7 @@ impl RagPipeline {
                     .and_then(|c| c.as_str())
                     .unwrap_or("")
                     .to_string();
-                
+
                 RagSearchResult {
                     chunk_id: matched.key,
                     content,
@@ -298,11 +324,11 @@ impl RagPipeline {
                 }
             })
             .collect();
-        
+
         info!("Found {} relevant documents", results.len());
         Ok(results)
     }
-    
+
     /// Generate a response using retrieved context
     pub async fn generate_response(
         &self,
@@ -313,50 +339,43 @@ impl RagPipeline {
         let context = context_docs
             .iter()
             .enumerate()
-            .map(|(i, doc)| {
-                format!("[Document {}]\n{}\n", i + 1, doc.content)
-            })
+            .map(|(i, doc)| format!("[Document {}]\n{}\n", i + 1, doc.content))
             .collect::<Vec<_>>()
             .join("\n");
-        
+
         // In a real implementation, this would call an LLM
         // For demo purposes, we'll return a formatted response
         let response = format!(
             "Based on the retrieved context, here's a response to your query:\n\n\
-            Query: {}\n\n\
-            Context Summary:\n{}\n\n\
+            Query: {query}\n\n\
+            Context Summary:\n{context}\n\n\
             [Note: In a production system, this would use an LLM to generate a proper response \
-            based on the retrieved context.]",
-            query, context
+            based on the retrieved context.]"
         );
-        
+
         Ok(response)
     }
 }
 
 /// High-level RAG query function
-pub async fn rag_query(
-    pipeline: &RagPipeline,
-    query: &str,
-    top_k: u32,
-) -> Result<String> {
+pub async fn rag_query(pipeline: &RagPipeline, query: &str, top_k: u32) -> Result<String> {
     // Search for relevant documents
     let results = pipeline.search(query, top_k, None).await?;
-    
+
     if results.is_empty() {
         return Ok("No relevant documents found for your query.".to_string());
     }
-    
+
     // Generate response
     let response = pipeline.generate_response(query, &results).await?;
-    
+
     Ok(response)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    
+
     #[tokio::test]
     async fn test_rag_config() {
         let config = RagConfig::default();

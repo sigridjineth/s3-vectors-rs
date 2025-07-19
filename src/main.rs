@@ -1,6 +1,6 @@
 use anyhow::Result;
 use clap::Parser;
-use s3_vectors::cli::{Cli, Commands, interactive::InteractiveMode};
+use s3_vectors::cli::{interactive::InteractiveMode, Cli, Commands};
 use s3_vectors::S3VectorsClient;
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
@@ -8,7 +8,7 @@ use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 async fn main() -> Result<()> {
     // Parse CLI arguments
     let cli = Cli::parse();
-    
+
     // Initialize logging based on verbosity
     let log_level = if cli.verbose { "debug" } else { "info" };
     tracing_subscriber::registry()
@@ -18,25 +18,30 @@ async fn main() -> Result<()> {
         )
         .with(tracing_subscriber::fmt::layer())
         .init();
-    
+
     // Create S3 Vectors client with proper precedence: profile > env > default
-    let client = match (&cli.profile, S3VectorsClient::from_env_with_region(Some(&cli.region))) {
+    let client = match (
+        &cli.profile,
+        S3VectorsClient::from_env_with_region(Some(&cli.region)),
+    ) {
         (Some(profile), _) => {
             tracing::info!("Using AWS profile: {}", profile);
-            S3VectorsClient::from_profile(profile, &cli.region)
-                .unwrap_or_else(|e| {
-                    tracing::warn!("Failed to load profile '{}': {}. Using default client.", profile, e);
-                    S3VectorsClient::new(&cli.region)
-                })
-        },
+            S3VectorsClient::from_profile(profile, &cli.region).unwrap_or_else(|e| {
+                tracing::warn!(
+                    "Failed to load profile '{}': {}. Using default client.",
+                    profile,
+                    e
+                );
+                S3VectorsClient::new(&cli.region)
+            })
+        }
         (None, Ok(client)) => client,
         (None, Err(_)) => {
             tracing::debug!("No credentials found in environment, using anonymous client");
             S3VectorsClient::new(&cli.region)
-        },
+        }
     };
-    
-    
+
     // Execute the appropriate command or enter interactive mode
     match &cli.command {
         Some(Commands::Init(cmd)) => cmd.execute().await?,
@@ -52,6 +57,6 @@ async fn main() -> Result<()> {
             interactive.run().await?;
         }
     }
-    
+
     Ok(())
 }
